@@ -16,7 +16,7 @@
 ## 対応済み
 
 - **Safari でのクリック判定**(T8):WebKit ではタップ由来の `click` の `pointerType` が "mouse" だったり無かったりするため、iPad/iPhone でアイコンをタップしてもポップアップが開かなかった。`click` の `pointerType` を使わず、直前の `pointerdown` の種別で判定するよう `bindPop` を修正した(マウスは従来どおり pointerenter/pointerleave)。実機(iPad/iPhone)で確認済み。
-- **テストの所要時間**(T2):以前は 2〜3 分かかっていた。vm と Proxy のモックをやめ、グローバルにモックを置いて `js/main.js` を import する方式にして、約 30 秒(実測 21〜25 秒)になった。
+- **テストの所要時間**(T2):以前は 2〜3 分かかっていた。T2(ES Modules への分割)に伴い、vm で `<script>` を実行する方式から、グローバルにモックを置いて `js/main.js` を import する方式に変わり、約 30 秒(実測 21〜25 秒)になった(Canvas のモックの Proxy は今も使っている)。
 
 ## 改善の候補
 
