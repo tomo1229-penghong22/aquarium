@@ -44,7 +44,7 @@ export function perfReport(cv, dpr, fishCount){                          // 0.5 
     el.style.cssText = "position:fixed;left:4px;top:4px;z-index:99999;margin:0;padding:4px 6px;background:rgba(0,0,0,.6);color:#9f9;font:10px/1.25 ui-monospace,Menlo,Consolas,monospace;pointer-events:none;white-space:pre";
     document.body.appendChild(el);
   }
-  const f = v => v.toFixed(2).padStart(6);
+  const f = v => " " + v.toFixed(2).padStart(8);
   const rows = Object.keys(s).map(k => `${k.padEnd(11)}${f(s[k].avg)}${f(s[k].p95)}`);
-  el.textContent = `FPS ${fps.toFixed(1)}  fish ${fishCount}\ncanvas ${info.canvas}  dpr ${dpr}\n${"ms".padEnd(11)}   avg   p95\n` + rows.join("\n");
+  el.textContent = `FPS ${fps.toFixed(1)}  fish ${fishCount}\ncanvas ${info.canvas}  dpr ${dpr}\n${"ms".padEnd(11)}${"avg".padStart(9)}${"p95".padStart(9)}\n` + rows.join("\n");
 }
