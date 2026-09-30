@@ -1,6 +1,53 @@
 # コード構成
 
-`index.html` 1ファイルの中身を、Claude Code が迷わず読めるように整理したものです。
+`index.html` と `js/`(ES Modules)の中身を、Claude Code が迷わず読めるように整理したものです。
+
+---
+
+## モジュール構成
+
+`index.html` は、マークアップと CSS、それに `<script type="module" src="js/main.js">` だけを持つ。JavaScript は素の ES Modules で、ビルドツールは使わない。`file://` では読み込めないので、`npm run serve` などの HTTP サーバ経由で開く。
+
+| ファイル | 中身 |
+|---|---|
+| `js/species.js` | `SPECIES`、`ORDER`、色バリエーション(`GUPPY_COL`、`PLATY_COL`)、ポップアップの説明文 `NOTES` と体長 `POP_L`。ほかに依存しない |
+| `js/core.js` | ユーティリティ(`TAU`、`clamp`、`lerp`、`mulberry`、`noise1`、`mix`)、`W` `H` `U` `DPR` `waterTop`、`ctx`、`Tset` `Tw` `timeScale` `nightOn` `nightT`、`counts`、保存と復元、`sandY` `bottomY` `current`、セッター |
+| `js/fish-render.js` | 描画ヘルパ、`BASE_A`、`EYE`、`PAINT`、`drawFish` |
+| `js/fish-behavior.js` | `fishes`、`schools`、`makeFish`、`syncFish`、`updateHealth`、`updateSchools`、`updateFish` |
+| `js/scene.js` | `buildScene`、`makeStatic`、水草・流木・岩・浮草の描画、コースティクス・光の筋・水面、温度計、LED・色調補正・ガラス、エアストーン・泡・粒子 |
+| `js/popup.js` | 拡大ポップアップ(`P`、`startAct`、`updatePop`、`drawPop`、`openPop` / `closePop`) |
+| `js/ui.js` | パネル、全画面表示、`updatePanel` |
+| `js/main.js` | `draw`、`loop`、`resize`、開始処理。エントリポイント |
+
+### import の向き
+
+| モジュール | import するモジュール |
+|---|---|
+| `species.js` | (なし) |
+| `core.js` | species |
+| `fish-render.js` | core、species |
+| `scene.js` | core |
+| `fish-behavior.js` | core、species、scene(`spawnBubble`) |
+| `popup.js` | core、species、fish-render |
+| `ui.js` | core、species、fish-render、fish-behavior、popup、**main(`resize`)** |
+| `main.js` | すべて |
+
+- 基本は一方向。例外は `ui.js` → `main.js`(`resize`)だけで、ここは循環 import になる。`resize` は関数宣言で、`ui.js` の中では関数の実行時にしか呼ばないので、評価順(TDZ)の問題は起きない。
+- エントリは必ず `main.js`。`ui.js` などを先頭から import すると、`main.js` の開始処理が `ui.js` の初期化より前に走ってしまう。
+
+### モジュールの評価順
+
+`main.js` の import 順に、species → core → fish-render → scene → fish-behavior → popup → ui が評価され、最後に `main.js` の本体(開始処理)が走る。これは元の単一ファイルでの実行順(状態 → 情景の Canvas `cc` の生成 → ポップアップ → パネル → 開始)と同じにしてある。トップレベルで Canvas や乱数を使う処理は、この順序に依存する(描画ログの基準と一致させるため)。
+
+### 共有変数の書き換え(セッター)
+
+ES Modules では、import した変数へ代入できない。`ctx` や `U` のように、ほかのモジュールが書き換える変数は、所有モジュールが `export let` とし、書き換え用の関数を export している。読み取り側は import した名前をそのまま使う(ライブバインディングなので、書き換え後の値が見える)。描画コードが素の `ctx` と `U` を使い続けられるのは、このため。
+
+| 所有モジュール | セッター |
+|---|---|
+| `core.js` | `setCtx`、`setU`、`setW`、`setH`、`setDPR`、`setWaterTop`、`setTset`、`setTw`、`setTimeScale`、`setNightOn`、`setNightT` |
+| `fish-render.js` | `setBaseA`、`setEye` |
+| `scene.js` | `setCCol`(コースティクスの色) |
 
 ---
 
@@ -43,7 +90,7 @@ loop(毎フレーム)
 | `counts` | 種ごとの匹数 |
 | `fishes` | 魚オブジェクトの配列(位置、速度、向き `flip`、姿勢、`phase`、`health`、`pale` など) |
 | `schools` | 種ごとの群れの目標点 |
-| `Tset` / `Tw` | 設定温度 / 現在の水温 |
+| `Tset` / `Tw` | 設定温度 / 現在の水温(`core.js`。書き換えは `setTset` / `setTw`) |
 | `timeScale` | 体調変化の早送り倍率 |
 | `nightOn` / `nightT` | 夜モードの目標 / 補間中の値(0=昼, 1=夜) |
 | `plants`, `rocks`, `wood`, `moss`, `floats`, `rays`, `motes`, `glints`, `orbs` | `buildScene()` が作る情景 |
@@ -105,8 +152,9 @@ loop(毎フレーム)
 
 ## 確認手順
 
-1. `npm test`:ブラウザなしで実行時エラー・NaN・体調モデル・ポップアップの詰まり・餌を食べられるかを確かめる(所要 2〜3 分)。
-2. `npm run serve` → `http://localhost:8000/`:見た目と操作を確認する。チェックしたい点の例:
+1. `npm test`:ブラウザなしで実行時エラー・NaN・体調モデル・ポップアップの詰まり・餌を食べられるかを確かめる(所要 2〜3 分)。Canvas と DOM のモックをグローバルに置いてから `js/main.js` を import する方式で、内部状態には各モジュールの export 経由でアクセスする。
+   - 見た目を変えない変更(分割・整理など)では、`npm run drawlog` も実行する。描画命令の列を `tests/baseline/` の基準ログと比べ、一致すれば描画結果は同一。
+2. `npm run serve` → `http://localhost:8000/`:見た目と操作を確認する(`file://` では開けない)。チェックしたい点の例:
    - 昼と夜の切り替え、18℃・25℃・34℃ での魚の様子
    - 各魚アイコンへのマウスオーバーと、離したときに閉じること
    - 全画面の出入り(ボタン・F・ダブルクリック・Esc)、横長と縦長の画面

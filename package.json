@@ -2,7 +2,7 @@
   "name": "tropical-aquarium",
   "version": "1.0.0",
   "private": true,
-  "description": "ブラウザで動くインタラクティブな熱帯魚の水槽(単一HTML)",
+  "description": "ブラウザで動くインタラクティブな熱帯魚の水槽(ES Modules・ビルドなし)",
   "type": "module",
   "scripts": {
     "test": "node tests/smoke.mjs",

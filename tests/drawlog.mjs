@@ -4,37 +4,40 @@
 //   node tests/drawlog.mjs            現状のログを取り、基準と比較する(一致なら exit 0、不一致なら exit 1)
 //
 // 構成(上から順に独立):
-//   1. 読み込み部  loadApp()     … index.html の <script> を取り出し、テスト用フックを差し込む。T2 でモジュール版に差し替える
+//   1. 読み込み部  loadApp()     … js/main.js(エントリ)を import する。フック(app オブジェクト)は、各モジュールの export から組み立てる
 //   2. モック・記録部            … 決定的な環境(シード乱数・固定刻み・仮想タイマ)と、Canvas 描画命令の記録
 //   3. 手順部      runScenario() … 固定手順。フック(app オブジェクト)経由でのみアプリに触る
 //   4. 実行部                    … 記録・比較・差分表示
 //
 // 記録するフレーム:全フレームをシミュレーションするが、ログに書くのは各段階の下記フレームだけ(LOG_FRAMES)。
-// 起動時(スクリプト読み込み中:静的背景の生成とパネルアイコン描画を含む)は全命令を記録する。
+// 起動時(モジュール読み込み中:静的背景の生成とパネルアイコン描画を含む)は全命令を記録する。
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
-import vm from "node:vm";
 
+const hostNow = Date.now.bind(Date); // 実時間(サンドボックス側で Date を固定する前に取っておく)
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BASE_DIR = join(root, "tests", "baseline");
 const BASE_GZ = join(BASE_DIR, "drawlog.log.gz");
 const BASE_SUM = join(BASE_DIR, "drawlog.sha256");
 
 /* ================= 1. 読み込み部 ================= */
-// 戻り値:{ source, filename }。source は sandbox 内で実行される JS。
-// 手順部が使うフック名(app.*)はここで定義する。モジュール版ではここだけを差し替える。
+// モック(グローバル)を置いた後に、通常の dynamic import でアプリを読み込む。
+// load():エントリ js/main.js を import する(モジュールの評価=起動。ここで起動時の描画命令が出る)
+// hooks():手順部が使うフック(app.*)。各モジュールの export から組み立てる。本番コードにテスト用の記述はない。
 function loadApp() {
-  const html = readFileSync(join(root, "index.html"), "utf8");
-  const m = html.match(/<script>([\s\S]*?)<\/script>/);
-  if (!m) throw new Error("<script> が見つかりません");
-  const MARK = "/* ---------------- 開始 ---------------- */";
-  if (!m[1].includes(MARK)) throw new Error(`開始マーカー「${MARK}」が見つかりません`);
-  const hook = `globalThis.__aq = { counts, ORDER, SPECIES, syncFish, setNight, setPseudo, openPop, closePop, drawIcon, startAct, P,
-    setU: v => { U = v; }, getU: () => U, getNightT: () => nightT };\n`;
-  return { source: m[1].replace(MARK, hook + MARK), filename: "index.html<script>" };
+  const imp = name => import(pathToFileURL(join(root, "js", name)).href);
+  return {
+    load: () => imp("main.js"),
+    hooks: async () => {
+      const [core, sp, beh, pop, ui] = await Promise.all([imp("core.js"), imp("species.js"), imp("fish-behavior.js"), imp("popup.js"), imp("ui.js")]);
+      return { counts: core.counts, ORDER: sp.ORDER, SPECIES: sp.SPECIES, syncFish: beh.syncFish, setNight: ui.setNight, setPseudo: ui.setPseudo,
+        openPop: pop.openPop, closePop: pop.closePop, drawIcon: ui.drawIcon, startAct: pop.startAct, P: pop.P,
+        setU: core.setU, getU: () => core.U, getNightT: () => core.nightT };
+    },
+  };
 }
 
 /* ================= 2. モック・記録部 ================= */
@@ -156,8 +159,10 @@ function createEnv() {
   let now = 0, rafQ = [], timers = [], timerSeq = 0;
   const win = { devicePixelRatio: 2, listeners: {}, addEventListener(t, f) { (this.listeners[t] ??= []).push(f); } };
   const ids = {};
-  const sandbox = {
-    console, JSON, Set, Map, Proxy, Uint8ClampedArray, Number, String, Array, Object, Error, parseFloat, parseInt, isFinite,
+  // モックはグローバルに置く(モジュールは素の名前 document / window などで参照する)。sandbox はグローバルそのもの。
+  const sandbox = globalThis;
+  const install = o => { for (const [k, v] of Object.entries(o)) Object.defineProperty(globalThis, k, { value: v, writable: true, configurable: true, enumerable: true }); };
+  install({
     Path2D,
     document: {
       getElementById: id => (ids[id] ??= (id === "tank" || id === "popcv") ? mkcanvas(id) : mkel()),
@@ -176,15 +181,12 @@ function createEnv() {
     setTimeout: (f, ms) => { const id = ++timerSeq; timers.push({ id, t: now + (ms || 0), f }); return id; },
     clearTimeout: id => { timers = timers.filter(x => x.id !== id); },
     innerWidth: 1280, innerHeight: 800,
-  };
-  // ホストの Math を書き換えず、サンドボックス用の Math を用意する
-  const M = {}; for (const k of Object.getOwnPropertyNames(Math)) M[k] = Math[k];
-  M.random = mulberry32(SEED);
-  sandbox.Math = M;
-  // Date は index.html では未使用だが、時刻依存を防ぐため固定する
+  });
+  // Math.random をシード付きにする(このプロセスでアプリ以外は Math.random を使わない)
+  Math.random = mulberry32(SEED);
+  // Date は未使用だが、時刻依存を防ぐため固定する
   const FIXED_T = Date.UTC(2024, 0, 1);
-  sandbox.Date = class extends Date { constructor(...a) { super(...(a.length ? a : [FIXED_T])); } static now() { return FIXED_T; } };
-  sandbox.globalThis = sandbox;
+  install({ Date: class extends Date { constructor(...a) { super(...(a.length ? a : [FIXED_T])); } static now() { return FIXED_T; } } });
   // tank の CSS 幅・高さは innerWidth/innerHeight から決める(resize の手順で効くように)
   const tank = mkcanvas("tank"); ids.tank = tank;
   Object.defineProperty(tank, "clientWidth", { get: () => Math.round(sandbox.innerWidth * 0.7), enumerable: true });
@@ -317,17 +319,16 @@ function runScenario(env, app) {
   return stageLines;
 }
 
-function generate() {
+async function generate() {
   const env = createEnv();
-  const { source, filename } = loadApp();
-  vm.createContext(env.sandbox);
+  const appLoader = loadApp();
   // 起動(読み込み)中は全命令を記録する
   env.lines.push("===== STAGE 0-load =====");
   env.setRec(true);
-  vm.runInContext(source, env.sandbox, { filename });
+  await appLoader.load();
   env.setRec(false);
   const loadEnd = env.lines.length;
-  const app = env.sandbox.__aq;
+  const app = await appLoader.hooks();
   const stages = [{ name: "0-load", start: 0, end: loadEnd, frames: ["all"] }, ...runScenario(env, app)];
   return { lines: env.lines, stages };
 }
@@ -347,12 +348,12 @@ function show(lines, from, to, mark) {
 }
 const sha = text => createHash("sha256").update(text).digest("hex");
 
-const t0 = Date.now();
+const t0 = hostNow();
 const record = process.argv.includes("--record");
-const { lines, stages } = generate();
+const { lines, stages } = await generate();
 const text = lines.join("\n") + "\n";
 const hash = sha(text);
-console.log(`ログ生成: ${lines.length} 行, ${(text.length / 1e6).toFixed(1)} MB(非圧縮), sha256 ${hash.slice(0, 16)}…  (${((Date.now() - t0) / 1000).toFixed(1)} 秒)`);
+console.log(`ログ生成: ${lines.length} 行, ${(text.length / 1e6).toFixed(1)} MB(非圧縮), sha256 ${hash.slice(0, 16)}…  (${((hostNow() - t0) / 1000).toFixed(1)} 秒)`);
 console.log("段階ごとの行数(記録したフレーム番号):");
 for (const s of stages) console.log(`  ${s.name.padEnd(18)} ${String(s.end - s.start).padStart(9)} 行  [${s.frames.join(", ")}]`);
 

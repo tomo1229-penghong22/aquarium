@@ -1,21 +1,12 @@
 // 水槽ページのスモークテスト(ブラウザ不要)
-// index.html の <script> を取り出し、Canvas と DOM を最小限モックして Node の vm 上で実行します。
+// Canvas と DOM を最小限モックしてグローバルに置き、js/main.js(ES Modules のエントリ)を dynamic import して実行します。
+// 内部状態へは、各モジュールの export 経由でアクセスします(本番コードにテスト用の記述はありません)。
 // 目的:実行時エラー・NaN・行動の詰まり・体調モデルの退行を早期に見つけること。
 // 見た目の確認はブラウザで行ってください(docs/ARCHITECTURE.md「確認手順」)。
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
-import vm from "node:vm";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const html = readFileSync(join(root, "index.html"), "utf8");
-const m = html.match(/<script>([\s\S]*?)<\/script>/);
-if (!m) throw new Error("<script> が見つかりません");
-const MARK = "/* ---------------- 開始 ---------------- */";
-if (!m[1].includes(MARK)) throw new Error(`開始マーカー「${MARK}」が見つかりません`);
-// テスト用フック:開始マーカーの直前で内部状態を globalThis.__aq に公開する
-const js = m[1].replace(MARK, `globalThis.__aq = { fishes, P, SPECIES, ORDER, counts, syncFish, popReset, updatePop, drawPop, startAct, setPseudo,
-  setT: v => { Tset = v; }, getT: () => Tw, setTimeScale: v => { timeScale = v; }, setNight: v => { nightOn = v; }, getNightT: () => nightT };\n${MARK}`);
 
 /* ---------------- モック ---------------- */
 const noop = () => {};
@@ -53,7 +44,6 @@ function mkcanvas() {
 const ids = {};
 let rafQ = [];
 const sandbox = {
-  console, Math, JSON, Date, Set, Map, Proxy, Uint8ClampedArray, Number, String, Array, Object, Error, parseFloat, parseInt, isFinite,
   Path2D: class { moveTo() {} lineTo() {} bezierCurveTo() {} quadraticCurveTo() {} closePath() {} },
   document: {
     getElementById: id => (ids[id] ??= (id === "tank" || id === "popcv") ? mkcanvas() : mkel()),
@@ -73,10 +63,14 @@ const sandbox = {
   setTimeout: f => { f(); return 0; }, clearTimeout: noop,
   innerWidth: 1280, innerHeight: 800,
 };
-sandbox.globalThis = sandbox;
-vm.createContext(sandbox);
-vm.runInContext(js, sandbox, { filename: "index.html<script>" });
-const A = sandbox.__aq;
+// モックをグローバルに置いてから、エントリ(js/main.js)を読み込む。読み込み=起動。
+for (const [k, v] of Object.entries(sandbox)) Object.defineProperty(globalThis, k, { value: v, writable: true, configurable: true, enumerable: true });
+const imp = name => import(pathToFileURL(join(root, "js", name)).href);
+await imp("main.js");
+const [core, sp, beh, pop, ui] = await Promise.all([imp("core.js"), imp("species.js"), imp("fish-behavior.js"), imp("popup.js"), imp("ui.js")]);
+const A = { fishes: beh.fishes, P: pop.P, SPECIES: sp.SPECIES, ORDER: sp.ORDER, counts: core.counts, syncFish: beh.syncFish,
+  popReset: pop.popReset, updatePop: pop.updatePop, drawPop: pop.drawPop, startAct: pop.startAct, setPseudo: ui.setPseudo,
+  setT: v => core.setTset(v), getT: () => core.Tw, setTimeScale: v => core.setTimeScale(v), setNight: v => core.setNightOn(v), getNightT: () => core.nightT };
 
 /* ---------------- ヘルパ ---------------- */
 let now = 0;
