@@ -17,6 +17,10 @@
 ```
 index.html            マークアップと CSS。js/main.js を読み込む
 js/                   ES Modules(役割ごとに分割。下の「コードの地図」)
+sw.js                 Service Worker(全ファイルの事前キャッシュ。オフライン起動用)
+manifest.webmanifest  PWA のマニフェスト(名前・アイコン・standalone 表示)
+icons/                PWA アイコンの PNG(tools/make-icons.mjs で生成)
+tools/make-icons.mjs  アイコン生成スクリプト(Node 標準の zlib のみ。`node tools/make-icons.mjs`)
 tests/smoke.mjs       ブラウザ不要のスモークテスト(モックをグローバルに置き、js/main.js を import して実行)
 tests/drawlog.mjs     描画命令の記録・比較ハーネス(`npm run drawlog`。分割などの「見た目を変えない変更」の検証用)
 docs/SPEC.md          機能仕様とパラメータ
@@ -72,4 +76,8 @@ package.json          npm test / npm run serve
 - **`resize()` で情景を作り直す。** 配置はシード固定の乱数なので、同じサイズなら同じ配置になる。魚の位置は比率で引き継ぐ。
 - **新しい行動や仕草を足したら、テストの `ACTS` にも追加する。**(`tests/smoke.mjs` と `tests/drawlog.mjs` の両方)
 - **モジュールのトップレベルの実行順を変えない。** `main.js` が import する順(species → core → fish-render → scene → fish-behavior → popup → ui)で各モジュールが評価され、最後に `main.js` の「開始」が走る。トップレベルで乱数や Canvas を使う処理を足すと、描画ログの基準(`tests/baseline/`)と食い違う。
+- **ファイルを足したり変えたりしたら、`sw.js` を更新する。** `js/` に .js を足す、`icons/` に PNG を足す、`index.html` などを変える、のどれでも、`sw.js` の `PRECACHE` に足し(漏れは `npm test` が検出する)、`CACHE_VERSION` を上げる。上げ忘れると、インストール済みの端末(特に iPad/iPhone のホーム画面)が古いキャッシュのまま起動する。
+- **パスは相対で書く。** GitHub Pages ではサブパス(`/<repo>/`)で配信される。`/js/...` のようなルート絶対パスは使わず、`./` か `js/...` で書く(`index.html`・`manifest.webmanifest`・`sw.js` とも)。
+- **`sw.js` はルートに置く。** スコープは置き場所で決まるため、`js/` などに移すとルートのページを制御できない。
+- **`env(safe-area-inset-*)` の余白は消さない。** standalone 表示(`black-translucent`)ではノッチやホームバーの下まで描画されるため、`:root` の padding と全画面時の操作ボタンの位置で避けている。通常のブラウザでは値が 0 になり、見た目は変わらない。
 - **見た目を変えない変更は `npm run drawlog` で確かめる。** 描画命令の列を基準ログと比べ、一致すれば描画結果は同一。見た目を変える変更をしたときは、基準ログの取り直し(`node tests/drawlog.mjs --record`)が必要になる。

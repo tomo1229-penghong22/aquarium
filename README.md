@@ -12,6 +12,16 @@ npm run drawlog      # 描画命令の列を基準ログと比較(見た目を�
 
 `npm run serve` は Python 3 の簡易サーバーを使います。ES Modules を使っているため、`index.html` を `file://` で直接開いても動きません。必ず HTTP サーバー経由で開いてください。
 
+## iPad / iPhone で使う(PWA)
+
+GitHub Pages などの HTTPS のサーバーに置くと、ホーム画面に追加して、PC や LAN なしで遊べます。
+
+1. iPad / iPhone の Safari でページを開く
+2. 共有ボタン → 「ホーム画面に追加」
+3. 以後は、ホーム画面のアイコンから起動する。最初に開いたあとは、機内モードでも起動します(Google Fonts だけは、初回にオンラインで開いたときに保存されます。取れていなければ、標準のフォントで表示されます)
+
+更新するときは、`sw.js` の `CACHE_VERSION`(例:`"v1"` → `"v2"`)を上げてから公開してください。上げないと、インストール済みの端末が古いキャッシュのまま起動します。ファイルを足したときは、`sw.js` の `PRECACHE` にも足します(漏れは `npm test` で分かります)。アイコンを作り直すときは `node tools/make-icons.mjs` を実行します。
+
 ## 資料
 
 - `CLAUDE.md` — Claude Code 向けの作業ガイド(最初に読む)

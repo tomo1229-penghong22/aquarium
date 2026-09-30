@@ -51,6 +51,25 @@ ES Modules では、import した変数へ代入できない。`ctx` や `U` の
 
 ---
 
+## PWA(オフライン起動・ホーム画面追加)
+
+GitHub Pages(サブパス配信)に置き、Safari の「ホーム画面に追加」で入れると、以後はオフラインでも起動する。描画には関与しない。
+
+| ファイル | 役割 |
+|---|---|
+| `manifest.webmanifest` | 名前・`start_url`・`scope`(`./`)・`display: standalone`・`orientation: any`・色・アイコン(192 / 512 の `any`、512 の `maskable`) |
+| `sw.js` | Service Worker。ルートに置く(スコープが置き場所で決まる) |
+| `icons/*.png` | `apple-touch-icon.png`(180px)、`icon-192.png`、`icon-512.png`、`icon-maskable-512.png`。`tools/make-icons.mjs` が生成する |
+| `index.html` | `<link rel="manifest">`、iOS 用メタタグ、`apple-touch-icon`、末尾の登録スクリプト(`load` 後に `./sw.js` を登録。失敗しても握りつぶす) |
+
+- パスはすべて相対(`./` か `js/...`)。ルート絶対パスは使わない。
+- `sw.js` の戦略:
+  - install で `PRECACHE`(`./`、`index.html`、manifest、`js/*.js`、`icons/*.png`)を `cache: "reload"` で取得して、`aquarium-<CACHE_VERSION>` に入れる。`skipWaiting()`。
+  - activate で、`aquarium-` で始まる古いキャッシュを削除する(`aquarium-fonts` は残す)。`clients.claim()`。
+  - fetch:同一オリジンはキャッシュ優先、なければネットワーク。ナビゲーションで両方だめなら、キャッシュ済みの `index.html` を返す。Google Fonts は初回にオンラインで取れたものを `aquarium-fonts` に入れる(stale-while-revalidate)。オフラインで未取得なら失敗させ、CSS のフォールバックフォントで表示する。
+- 更新の手順:`js/` や `index.html` などを変えたら、`sw.js` の `CACHE_VERSION`(`"v1"` → `"v2"`)を上げる。ファイルを足したら `PRECACHE` にも足す。`npm test` の「sw.js の事前キャッシュに全ファイルが含まれる」が、足し忘れを検出する(バージョンの上げ忘れは検出できない)。新しい Service Worker は、次にページを開いたときに入れ替わる(`skipWaiting` と `clients.claim` により待機しない。ただし表示中のページは、再読み込みするまで古いファイルのまま)。
+- iOS 向け:`viewport-fit=cover` と `black-translucent` で、standalone 表示では画面全体に描画される。ノッチとホームバーは `env(safe-area-inset-*)` で避ける(`:root` の padding、全画面時の `.ctl` と `.fshint`)。
+
 ## 全体の流れ
 
 ```

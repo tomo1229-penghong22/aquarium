@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>熱帯魚の水槽</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#3d7a55">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="水槽">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
@@ -12,6 +19,8 @@
   box-sizing:border-box;
   padding-top:env(safe-area-inset-top,0px);
   padding-bottom:env(safe-area-inset-bottom,0px);
+  padding-left:env(safe-area-inset-left,0px);
+  padding-right:env(safe-area-inset-right,0px);
   --bg:#e6ece8; --panel:#f7faf8; --ink:#1d2927; --sub:#5b6966; --line:#d3ddd8;
   --accent:#3d7a55; --accent-soft:#dbeadf; --btn:#e9f0ec; --btn-h:#dbe6e0;
   --wood1:#6b4f36; --wood2:#4b3726; --glow:#f4f1e2;
@@ -186,5 +195,12 @@ input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;bac
 </div>
 
 <script type="module" src="js/main.js"></script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    try { navigator.serviceWorker.register("./sw.js").catch(() => {}); } catch (e) {}
+  });
+}
+</script>
 </body>
 </html>

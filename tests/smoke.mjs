@@ -5,6 +5,7 @@
 // 見た目の確認はブラウザで行ってください(docs/ARCHITECTURE.md「確認手順」)。
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -128,6 +129,16 @@ for (const sp of A.ORDER) {
     if (A.P.d.eaten) ok++;
   }
   check(`餌を食べられる:${A.SPECIES[sp].name}`, ok === 10, `${ok}/10`);
+}
+
+{
+  // sw.js の事前キャッシュのリストに、js/ の全 .js・icons/ の全 PNG・manifest が含まれていること
+  const sw = readFileSync(join(root, "sw.js"), "utf8");
+  const list = ((sw.match(/PRECACHE\s*=\s*\[([\s\S]*?)\]/) || [])[1] || "").match(/"[^"]+"/g)?.map(s => s.slice(1, -1).replace(/^\.\//, "")) ?? [];
+  const need = [...readdirSync(join(root, "js")).filter(f => f.endsWith(".js")).map(f => `js/${f}`),
+    ...readdirSync(join(root, "icons")).filter(f => f.endsWith(".png")).map(f => `icons/${f}`), "manifest.webmanifest", "index.html"];
+  const missing = need.filter(f => !list.includes(f));
+  check("sw.js の事前キャッシュに全ファイルが含まれる", need.length > 0 && missing.length === 0, missing.length ? `不足: ${missing.join(", ")}` : `${need.length} ファイル`);
 }
 
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて成功");
