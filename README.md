@@ -30,6 +30,10 @@ GitHub Pages などの HTTPS のサーバーに置くと、ホーム画面に追
 - `docs/HISTORY.md` — これまでの経緯
 - `docs/BACKLOG.md` — 次の候補と既知の課題
 
+## 性能計測(開発者向け)
+
+URL に `?perf` を付けて開く(例:`http://localhost:8000/?perf`)と、画面左上に計測オーバーレイが出ます。描画順の区間ごと(static, rays, backPlants, haze, bubbles, backFish, midground, frontFish, frontPlants, floats, motes, caustics, surface, grade, led, thermometer, glass)、draw 全体、ロジック更新(logic)、フレーム間隔(frame)について、直近 120 フレームの平均と p95(ms)を 0.5 秒ごとに更新して表示し、FPS・魚の匹数・canvas の実ピクセルサイズ・devicePixelRatio も併記します。最新の集計は `window.__perf` でも読めます。`?perf` が無いときは計測コードは一切動きません。DevTools が使えない iPad / iPhone の Safari でも数値を読めます。
+
 ## 必要なもの
 
 - Node.js 18 以上(テスト用)
