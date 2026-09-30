@@ -17,6 +17,8 @@ import { dirname, join } from "node:path";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
 
+// getHours などはローカル時刻を返すため、実行環境のタイムゾーンに描画ログが依存しないよう、TZ を固定する(24時間計の針が変わる)
+process.env.TZ = "UTC";
 const hostNow = Date.now.bind(Date); // 実時間(サンドボックス側で Date を固定する前に取っておく)
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BASE_DIR = join(root, "tests", "baseline");
@@ -184,8 +186,8 @@ function createEnv() {
   });
   // Math.random をシード付きにする(このプロセスでアプリ以外は Math.random を使わない)
   Math.random = mulberry32(SEED);
-  // Date は未使用だが、時刻依存を防ぐため固定する
-  const FIXED_T = Date.UTC(2024, 0, 1);
+  // Date は 24時間計(new Date().getHours())が使う。時刻依存を防ぐため固定する
+  const FIXED_T = Date.UTC(2024, 0, 1, 6, 30); // 6:30(UTC)。時計の針が分も含めて動く時刻
   install({ Date: class extends Date { constructor(...a) { super(...(a.length ? a : [FIXED_T])); } static now() { return FIXED_T; } } });
   // tank の CSS 幅・高さは innerWidth/innerHeight から決める(resize の手順で効くように)
   const tank = mkcanvas("tank"); ids.tank = tank;

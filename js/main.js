@@ -4,7 +4,7 @@ import { DPR, H, Tset, Tw, W, clamp, ctx, cv, lerp, nightOn, nightT, sandY, setD
 import { ORDER } from "./species.js";
 import { drawFish } from "./fish-render.js";
 import { fishes, schools, syncFish, updateFish, updateHealth, updateSchools } from "./fish-behavior.js";
-import { bubbles, buildScene, cc, computeCaustics, drawBubbles, drawCarpet, drawFern, drawFixture, drawFloats, drawGlass, drawLotus, drawMoss, drawMotes, drawRays, drawRibbon, drawRock, drawStem, drawSurface, drawSword, drawThermometer, drawWood, grade, plants, rocks, setCCol, staticLayer, staticNight, updateBubbles } from "./scene.js";
+import { bubbles, buildScene, cc, computeCaustics, drawBubbles, drawCarpet, drawClock, drawFern, drawFixture, drawFloats, drawGlass, drawLotus, drawMoss, drawMotes, drawRays, drawRibbon, drawRock, drawStem, drawSurface, drawSword, drawThermometer, drawWood, grade, plants, rocks, setCCol, staticLayer, staticNight, updateBubbles } from "./scene.js";
 import { updatePanel } from "./ui.js";
 import { PERF, perfBegin, perfEnd, perfFrame, perfMark, perfReport } from "./perf.js";
 
@@ -66,6 +66,8 @@ function draw(){
   if (PERF) perfMark("led");
   drawThermometer();
   if (PERF) perfMark("thermometer");
+  drawClock();
+  if (PERF) perfMark("clock");
   drawGlass();
   if (PERF) { perfMark("glass"); perfEnd("draw"); }
 }

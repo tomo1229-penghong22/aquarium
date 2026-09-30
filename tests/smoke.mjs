@@ -72,6 +72,7 @@ for (const [k, v] of Object.entries(sandbox)) Object.defineProperty(globalThis, 
 const imp = name => import(pathToFileURL(join(root, "js", name)).href);
 await imp("main.js");
 const [core, sp, beh, pop, ui] = await Promise.all([imp("core.js"), imp("species.js"), imp("fish-behavior.js"), imp("popup.js"), imp("ui.js")]);
+const scene = await imp("scene.js");
 const A = { fishes: beh.fishes, P: pop.P, SPECIES: sp.SPECIES, ORDER: sp.ORDER, counts: core.counts, syncFish: beh.syncFish,
   popReset: pop.popReset, updatePop: pop.updatePop, drawPop: pop.drawPop, startAct: pop.startAct, setPseudo: ui.setPseudo,
   setT: v => core.setTset(v), getT: () => core.Tw, setTimeScale: v => core.setTimeScale(v), setNight: v => core.setNightOn(v), getNightT: () => core.nightT };
@@ -156,6 +157,19 @@ for (const sp of A.ORDER) {
   fire("pointerdown", { pointerType: "mouse" }); fire("click", { pointerType: "mouse" });
   const c3 = A.P.open === false;
   check("タップでポップアップが開閉する(click の pointerType に依存しない)", !!ic && c1 && c2 && c3, `開く ${c1} / 閉じる ${c2} / マウス無視 ${c3}`);
+}
+
+{
+  // 24時間計:時針の角度(純粋関数)と描画関数
+  const a = (h, m) => scene.clockHourAngle(h, m);
+  const near = (x, y) => Math.abs(x - y) < 1e-9;
+  check("24時間計の角度:0:00→0 / 6:00→90 / 12:00→180 / 18:00→270 / 6:30→97.5",
+    near(a(0, 0), 0) && near(a(6, 0), 90) && near(a(12, 0), 180) && near(a(18, 0), 270) && near(a(6, 30), 97.5),
+    `${a(0, 0)} / ${a(6, 0)} / ${a(12, 0)} / ${a(18, 0)} / ${a(6, 30)}`);
+  check("24時間計の角度:23:59 は 360 未満で 359 超", a(23, 59) < 360 && a(23, 59) > 359, `${a(23, 59)}`);
+  let err = null;
+  try { scene.drawClock(); } catch (e) { err = e; }
+  check("24時間計の描画関数が例外なく呼べる", !err, err ? String(err) : "");
 }
 
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて成功");

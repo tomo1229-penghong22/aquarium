@@ -523,6 +523,43 @@ export function drawThermometer(){
   ctx.restore();
 }
 
+/* ---------------- 24時間計 ---------------- */
+// 時針の角度(度)。0時を真上として時計回り、24時間で360度。分に応じて連続的に進む。
+export function clockHourAngle(h, m){ return ((h + m / 60) / 24) * 360; }
+export function drawClock(){
+  // 左下。温度計と同じ x。半径 28U、下端は水槽の底から 18U 上。U = min(W/1000, H/625) なので
+  // 上端(吸盤込み)H-85U は常に H*0.864 以下 → 温度計の℃ラベル(下端 約 0.585H+21U ≒ 0.62H 以下)と重ならない。
+  const r = 28 * U, x = W * 0.045, y = H - 46 * U;
+  const now = new Date(), ang = clockHourAngle(now.getHours(), now.getMinutes()) * Math.PI / 180;
+  const at = (a, d) => [x + Math.sin(a) * d, y - Math.cos(a) * d];
+  ctx.save();
+  // 吸盤
+  ctx.fillStyle = "rgba(235,245,245,0.45)";
+  ctx.beginPath(); ctx.ellipse(x, y - r - 3 * U, 9 * U, 5 * U, 0, 0, TAU); ctx.fill();
+  // 文字盤(半透明のガラス)
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU);
+  ctx.fillStyle = "rgba(245,250,250,0.32)"; ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.lineWidth = 1.5 * U; ctx.stroke();
+  // 目盛(1時間ごと、6時間ごとは太く長く)
+  ctx.strokeStyle = "rgba(30,40,40,0.75)"; ctx.lineCap = "round";
+  for (let i = 0; i < 24; i++) {
+    const a = i / 24 * TAU, big = i % 6 === 0;
+    const [x0, y0] = at(a, r * (big ? 0.76 : 0.85)), [x1, y1] = at(a, r * 0.94);
+    ctx.lineWidth = big ? 1.4 * U : 0.7 * U;
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  }
+  // 数字(0・6・12・18)
+  ctx.fillStyle = "rgba(20,30,30,0.9)";
+  ctx.font = `600 ${Math.max(8, 8.5 * U)}px "Zen Kaku Gothic New", sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  [0, 6, 12, 18].forEach(hh => { const [tx, ty] = at(hh / 24 * TAU, r * 0.55); ctx.fillText(String(hh), tx, ty); });
+  // 時針(1本のみ)
+  const [hx, hy] = at(ang, r * 0.7);
+  ctx.strokeStyle = "#d8322b"; ctx.lineWidth = 2 * U;
+  ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(hx, hy); ctx.stroke();
+  ctx.fillStyle = "#d8322b"; ctx.beginPath(); ctx.arc(x, y, 2.2 * U, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
 /* ---------------- ガラスの映り込み ---------------- */
 function nightGrade(n){
   ctx.save();
