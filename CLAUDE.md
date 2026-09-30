@@ -4,37 +4,40 @@
 
 ## プロジェクトの概要
 
-ブラウザで動く、インタラクティブな熱帯魚の水槽です。`index.html`(マークアップと CSS)と、`js/` の ES Modules(素の `<script type="module">`、ビルドなし)で構成しています。Canvas 2D で水槽を毎フレーム描画します。
+ブラウザで動く、インタラクティブな熱帯魚の水槽です。`index.html`(マークアップと CSS)と、`js/` の ES Modules(素の `<script type="module">`、ビルドなし)で構成しています。GitHub Pages(https://tomo1229-penghong22.github.io/aquarium/)から PWA として配信します。Canvas 2D で水槽を毎フレーム描画します。
 
 - 魚6種(ネオンテトラ、ラミーノーズテトラ、グッピー、プラティ、エンゼルフィッシュ、コリドラス・パンダ)の数を選べる
 - 水温 18〜34℃。水温に応じて行動と体調が変化する
 - 昼(自然光)/夜(白色LED)の照明モード
-- 魚アイコンにマウスを重ねると、拡大した魚がポップアップで動く(ときどきユーモラスな仕草をする)
+- 魚アイコンにマウスを重ねる(iPad/iPhone などタッチ端末ではタップする)と、拡大した魚がポップアップで動く(ときどきユーモラスな仕草をする)
 - 全画面モード(ボタン/F キー/ダブルクリック、Esc で戻る)
 
 ## ファイル構成
 
 ```
 index.html            マークアップと CSS。js/main.js を読み込む
-js/                   ES Modules(役割ごとに分割。下の「コードの地図」)
+js/                   ES Modules(役割ごとに分割。下の「コードの地図」)。8 モジュールと、`?perf` 用の `perf.js`
 sw.js                 Service Worker(全ファイルの事前キャッシュ。オフライン起動用)
 manifest.webmanifest  PWA のマニフェスト(名前・アイコン・standalone 表示)
 icons/                PWA アイコンの PNG(tools/make-icons.mjs で生成)
 tools/make-icons.mjs  アイコン生成スクリプト(Node 標準の zlib のみ。`node tools/make-icons.mjs`)
+tools/release.mjs     リリース補助(`npm run release`。CACHE_VERSION を上げてコミット・push)
 tests/smoke.mjs       ブラウザ不要のスモークテスト(モックをグローバルに置き、js/main.js を import して実行)
-tests/drawlog.mjs     描画命令の記録・比較ハーネス(`npm run drawlog`。分割などの「見た目を変えない変更」の検証用)
+tests/drawlog.mjs     描画命令の記録・比較ハーネス(`npm run drawlog`、約 40〜50 秒。分割などの「見た目を変えない変更」の検証用)
+tests/school-metric.mjs 群れの形の計測(`npm run school`)
+tests/baseline/       描画ログの基準。`drawlog.log.gz` はリポジトリ外(ハッシュ `drawlog.sha256` だけを管理)
 docs/SPEC.md          機能仕様とパラメータ
 docs/ARCHITECTURE.md  コード構成・描画順・状態・不変条件
 docs/HISTORY.md       これまでの依頼と決定の経緯
 docs/BACKLOG.md       次の候補と既知の課題
-package.json          npm test / npm run serve
+package.json          npm test / drawlog / school / release / serve
 ```
 
 ## 作業の進め方(守ってほしいこと)
 
 1. **変更の前に方針を短く示す。** 見た目に関わる変更は特に、何をどう変えるかを先に共有する。
 2. **書き込み・送信系の操作は事前に確認する。** git commit / push、ファイルの削除、外部への公開などは、実行前にユーザーに確認を取る。
-3. **変更のたびに `npm test` を実行する。** 全項目が ✓ になることを確認する(所要 約 25 秒)。
+3. **変更のたびに `npm test` を実行する。** 全項目が ✓ になることを確認する(所要 約 30 秒)。
 4. **見た目はブラウザで確認する。** `npm run serve` → `http://localhost:8000/` を開く。テストは描画結果を見ていないので、見た目の良し悪しはブラウザでしか判断できない。
 5. **説明は日本語で。** UI の文言も日本語。
 
@@ -57,13 +60,14 @@ package.json          npm test / npm run serve
 | `js/core.js` | ユーティリティ / 状態 | `TAU`・`clamp`・`lerp`・`mix`・`noise1`、水槽の大きさ `W` `H` `U` `DPR` `waterTop`、描画先 `ctx`、`Tset` / `Tw` / `timeScale` / `nightOn` / `nightT`、保存と復元、`sandY` / `bottomY` / `current`、セッター |
 | `js/species.js` | 魚の種類 | `SPECIES`(種ごとの大きさ・速さ・群れ度・生息層・適温・透明度)、`ORDER`、色バリエーション、ポップアップの説明文 `NOTES` と体長 `POP_L` |
 | `js/fish-render.js` | 描画ヘルパ | 体・尾・ひれのパス、`shade`(陰影と縁の光)、`eye`、`BASE_A`、`EYE`、`PAINT`(種ごとの描画関数)、`drawFish` |
-| `js/fish-behavior.js` | 魚の生成 / 体調・行動 | `fishes`、`schools`、`makeFish`、`syncFish`、`updateHealth`、`updateFish`(群れ・分離・壁・温度による層の移動) |
+| `js/fish-behavior.js` | 魚の生成 / 体調・行動 | `fishes`、`schools`、`makeFish`、`syncFish`、`updateHealth`、`updateFish`(群れ・分離・壁・温度による層の移動)。群れる種(ネオン・ラミー)は縦の散らばり 1.0、前後に楕円の分離(1.3)、速度が基準の 10% 未満なら円形の分離 |
 | `js/scene.js` | 配置 / 水草の描画 / 光・水面 / 温度計 / ガラスの映り込み / エアストーン・泡・浮遊物 | `buildScene()`(水草・岩・流木・浮草・光の筋などを乱数シード固定で生成)、`makeStatic()`(昼/夜の静的背景)、`spine`(水流で揺れる背骨)と各水草・流木・こけ・浮草の描画、コースティクス、光の筋、水面、夜の照明、LED、色調補正、温度計、泡 |
 | `js/popup.js` | 拡大ポップアップ | 小さな水槽の状態 `P`、行動の状態機械(`startAct` / `updatePop`)、描画、開閉 |
 | `js/ui.js` | パネル / 全画面表示 | 魚の選択 UI、照明切り替え、全画面 API とその代替表示、`updatePanel` |
+| `js/perf.js` | 性能計測 | `?perf` を付けて開いたときだけ有効。描画の区間ごとの所要時間を表示(iPhone では 95 匹でも 60fps、draw 約 4ms)。無効時は何もしない |
 | `js/main.js` | メインループ / 開始 | `draw()` の描画順、`loop()`、`resize()`、起動処理(エントリポイント) |
 
-依存の向きは `species` ← `core` ← (`fish-render`, `scene`) ← (`fish-behavior`, `popup`) ← `ui` ← `main` です。例外は `ui.js` が `main.js` の `resize` を使うことだけで、ここは循環 import になります(`resize` は関数の中でしか呼ばないので問題ありません)。エントリは必ず `main.js` にしてください。
+依存の向きは `species` ← `core` ← (`fish-render`, `scene`) ← (`fish-behavior`, `popup`) ← `ui` ← `main` です(`perf.js` は `main.js` から呼ばれるだけで、ほかに依存しません)。例外は `ui.js` が `main.js` の `resize` を使うことだけで、ここは循環 import になります(`resize` は関数の中でしか呼ばないので問題ありません)。エントリは必ず `main.js` にしてください。
 
 ## 変更するときの落とし穴
 

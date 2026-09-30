@@ -1,13 +1,14 @@
 # 熱帯魚の水槽
 
-ブラウザで動く、インタラクティブな熱帯魚の水槽です。`index.html` と `js/` の ES Modules(ビルドツールなし)で構成しています。
+ブラウザで動く、インタラクティブな熱帯魚の水槽です。`index.html` と `js/` の ES Modules(ビルドツールなし)で構成し、GitHub Pages(https://tomo1229-penghong22.github.io/aquarium/)から PWA として配信しています。魚のアイコンにマウスを重ねる(タッチ端末ではタップ)と、拡大した魚がポップアップで動きます。
 
 ## すぐに試す
 
 ```bash
 npm run serve        # http://localhost:8000/ を開く
-npm test             # スモークテスト(ブラウザ不要、2〜3分)
-npm run drawlog      # 描画命令の列を基準ログと比較(見た目を変えない変更の検証用)
+npm test             # スモークテスト(ブラウザ不要、約 30 秒)
+npm run drawlog      # 描画命令の列を基準ログと比較(見た目を変えない変更の検証用、約 40〜50 秒)
+npm run school       # 群れの形(一列に見えないか)を計測
 ```
 
 `npm run serve` は Python 3 の簡易サーバーを使います。ES Modules を使っているため、`index.html` を `file://` で直接開いても動きません。必ず HTTP サーバー経由で開いてください。
@@ -21,6 +22,8 @@ GitHub Pages などの HTTPS のサーバーに置くと、ホーム画面に追
 3. 以後は、ホーム画面のアイコンから起動する。最初に開いたあとは、機内モードでも起動します(Google Fonts だけは、初回にオンラインで開いたときに保存されます。取れていなければ、標準のフォントで表示されます)
 
 アプリのファイルを変えてコミットしたら、`npm run release` で公開します(事前の確認だけなら `npm run release -- --dry-run`)。main ブランチ・未コミットなし・origin より遅れていない、を確認し、`npm test` を通したうえで、`sw.js` の `CACHE_VERSION`(例:`"v2"` → `"v3"`)を上げてコミットし、push します。`CACHE_VERSION` を上げないと、インストール済みの端末が古いキャッシュのまま起動するため、手では上げず、このコマンドを使ってください。ファイルを足したときの `sw.js` の `PRECACHE` への追加は手作業です(漏れは `npm test` で分かります)。アイコンを作り直すときは `node tools/make-icons.mjs` を実行します。
+
+描画ログの基準 `tests/baseline/drawlog.log.gz` は容量が大きいためリポジトリに含めず、ハッシュ(`tests/baseline/drawlog.sha256`)だけを管理しています。基準を取り直すには `node tests/drawlog.mjs --record` を実行します。
 
 ## 資料
 

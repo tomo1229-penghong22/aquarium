@@ -2,7 +2,7 @@
 
 claude.ai のチャットで作ってきた内容です。各段階の依頼と、そのとき決めたことを残します。
 
-公開中のアーティファクト:https://claude.ai/artifact/162zdJqm9DkE7nBha7HFcg
+以前の公開先:claude.ai のアーティファクト(https://claude.ai/artifact/162zdJqm9DkE7nBha7HFcg)。現在は GitHub Pages(https://tomo1229-penghong22.github.io/aquarium/)で配信している(下の 10・11 を参照)。
 
 ---
 
@@ -63,3 +63,19 @@ claude.ai のチャットで作ってきた内容です。各段階の依頼と�
 **依頼**:iPad/iPhone で、PC や LAN に頼らず単独で動かしたい。魚の種類や器材を増やしやすくしたい。
 
 **決めたこと**:単一ファイル制約を撤廃した(claude.ai での公開をやめ、iPad/iPhone 向けに PWA として配信する方針)。`index.html` は マークアップと CSS だけにし、JavaScript は `js/` の 8 モジュール(素の ES Modules、ビルドなし)に分けた。ロジックと実行順は変えていない。分割前後で描画命令の列を記録して比較し(`npm run drawlog`)、完全に一致することで同一性を確かめた。`file://` では開けなくなったため、HTTP サーバ経由で開く。
+
+## 10. PWA 化と GitHub Pages での公開
+
+**依頼**:iPad/iPhone で、オフラインでもホーム画面から起動できるようにしたい。
+
+**決めたこと**:`manifest.webmanifest`、`sw.js`(全ファイルの事前キャッシュ)、`icons/` を足して PWA にした。GitHub Pages(サブパス配信)に置くため、パスはすべて相対にした。ノッチとホームバーは `env(safe-area-inset-*)` で避ける。Jekyll の処理は無効にした。`?perf` で描画の区間ごとの所要時間を見られるようにした(iPhone では 95 匹でも 60fps、draw 約 4ms)。
+
+## 11. 群れの修正・release・タップの修正
+
+**群れ**:ネオン・ラミーの群れが数珠つなぎに見えたので、縦の散らばりを 0.6 から 1.0 に広げ、同種間の分離を進行方向の前後に長い楕円(1.3 倍)にした。速度がほぼ 0 のとき全同種から押される不具合は、基準速度の 10% 未満なら円形の分離に戻して直した。群れの形は `npm run school` で計測する。
+
+**release**:`sw.js` の `CACHE_VERSION` の上げ忘れを防ぐため、`npm run release`(確認は `--dry-run`)で、確認・`npm test`・版の更新・コミット・push をまとめて行うようにした。
+
+**T2(テストの高速化)**:テストを、vm と Proxy のモックから、グローバルにモックを置いて import する方式に変え、2〜3 分から約 30 秒にした。
+
+**T8(タップ)**:iOS Safari でアイコンをタップしてもポップアップが開かなかった問題を、`click` の `pointerType` に頼らず、直前の `pointerdown` の種別で判定して修正した。実機で確認済み。

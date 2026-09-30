@@ -17,6 +17,7 @@
 | `js/scene.js` | `buildScene`、`makeStatic`、水草・流木・岩・浮草の描画、コースティクス・光の筋・水面、温度計、LED・色調補正・ガラス、エアストーン・泡・粒子 |
 | `js/popup.js` | 拡大ポップアップ(`P`、`startAct`、`updatePop`、`drawPop`、`openPop` / `closePop`) |
 | `js/ui.js` | パネル、全画面表示、`updatePanel` |
+| `js/perf.js` | `?perf` のときだけ有効な性能計測(`PERF`、`perfBegin` / `perfMark` / `perfEnd` / `perfFrame` / `perfReport`)。ほかに依存しない |
 | `js/main.js` | `draw`、`loop`、`resize`、開始処理。エントリポイント |
 
 ### import の向き
@@ -30,7 +31,8 @@
 | `fish-behavior.js` | core、species、scene(`spawnBubble`) |
 | `popup.js` | core、species、fish-render |
 | `ui.js` | core、species、fish-render、fish-behavior、popup、**main(`resize`)** |
-| `main.js` | すべて |
+| `perf.js` | (なし) |
+| `main.js` | すべて(`perf.js` を含む) |
 
 - 基本は一方向。例外は `ui.js` → `main.js`(`resize`)だけで、ここは循環 import になる。`resize` は関数宣言で、`ui.js` の中では関数の実行時にしか呼ばないので、評価順(TDZ)の問題は起きない。
 - エントリは必ず `main.js`。`ui.js` などを先頭から import すると、`main.js` の開始処理が `ui.js` の初期化より前に走ってしまう。
@@ -161,7 +163,7 @@ loop(毎フレーム)
 - 論理サイズ 304×190。`ctx` と `U` を一時的に差し替えて `PAINT` を再利用する。
 - 仕草は状態機械:`pickAct()` で選び、`startAct(name)` で初期化、`updatePop()` の `switch` で進め、`endAct()` で漂う状態に戻る。
 - 視線は `EYE = { dx, dy, roll }` を描画の間だけ設定して `eye()` に渡す。`roll` はコリドラスのウインク用。
-- 開閉:`bindPop` がアイコンに紐づける。マウスがアイコンの外に出たら、`pointermove` の判定で必ず閉じる。
+- 開閉:`bindPop` がアイコンに紐づける。マウスは pointerenter / pointerleave で開閉し、外に出たら `pointermove` の判定で必ず閉じる。タッチ(iPad/iPhone)はタップで開閉する。Safari では `click` の `pointerType` が当てにならないため、直前の `pointerdown` の種別で判定する(T8。実機で確認済み)。
 
 ## 全画面
 
@@ -171,10 +173,11 @@ loop(毎フレーム)
 
 ## 確認手順
 
-1. `npm test`:ブラウザなしで実行時エラー・NaN・体調モデル・ポップアップの詰まり・餌を食べられるかを確かめる(所要 2〜3 分)。Canvas と DOM のモックをグローバルに置いてから `js/main.js` を import する方式で、内部状態には各モジュールの export 経由でアクセスする。
-   - 見た目を変えない変更(分割・整理など)では、`npm run drawlog` も実行する。描画命令の列を `tests/baseline/` の基準ログと比べ、一致すれば描画結果は同一。
+1. `npm test`:ブラウザなしで実行時エラー・NaN・体調モデル・ポップアップの詰まり・餌を食べられるかを確かめる(所要 約 30 秒)。Canvas と DOM のモックをグローバルに置いてから `js/main.js` を import する方式で、内部状態には各モジュールの export 経由でアクセスする。
+   - 見た目を変えない変更(分割・整理など)では、`npm run drawlog` も実行する。描画命令の列を `tests/baseline/` の基準ログと比べ、一致すれば描画結果は同一(所要 約 40〜50 秒)。基準の `drawlog.log.gz` はリポジトリ外で、ハッシュ `drawlog.sha256` だけを管理する。
+   - 群れの形を確かめるときは `npm run school`。
 2. `npm run serve` → `http://localhost:8000/`:見た目と操作を確認する(`file://` では開けない)。チェックしたい点の例:
    - 昼と夜の切り替え、18℃・25℃・34℃ での魚の様子
-   - 各魚アイコンへのマウスオーバーと、離したときに閉じること
+   - 各魚アイコンへのマウスオーバー(タッチ端末ではタップ)と、離したときに閉じること
    - 全画面の出入り(ボタン・F・ダブルクリック・Esc)、横長と縦長の画面
    - ダークモードでのパネルの見え方
