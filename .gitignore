@@ -2,3 +2,6 @@ node_modules/
 .DS_Store
 *.log
 .claude/
+
+# 描画ログの基準(10MB 超のため除外。ハッシュ tests/baseline/drawlog.sha256 のみ管理)
+tests/baseline/drawlog.log.gz
