@@ -37,9 +37,12 @@ function mkel(extra = {}) {
     offsetWidth: 320, offsetHeight: 260, ...extra,
   };
 }
+const canvases = [];
 function mkcanvas() {
   const c = mkel({ width: 0, height: 0, clientWidth: 900, clientHeight: 0, getContext: () => mkctx() });
   c.parentElement = mkel();
+  // アイコン(className "ico")のリスナーだけ保持して、テストから発火できるようにする
+  c.L = {}; c.addEventListener = (t, f) => { (c.L[t] ??= []).push(f); }; canvases.push(c);
   return c;
 }
 const ids = {};
@@ -139,6 +142,20 @@ for (const sp of A.ORDER) {
     ...readdirSync(join(root, "icons")).filter(f => f.endsWith(".png")).map(f => `icons/${f}`), "manifest.webmanifest", "index.html"];
   const missing = need.filter(f => !list.includes(f));
   check("sw.js の事前キャッシュに全ファイルが含まれる", need.length > 0 && missing.length === 0, missing.length ? `不足: ${missing.join(", ")}` : `${need.length} ファイル`);
+}
+
+{
+  // タップでポップアップが開閉する(click の pointerType に依存しない)
+  const ic = canvases.find(c => c.className === "ico" && c.L.click);
+  const fire = (t, e) => (ic.L[t] || []).forEach(f => f(e));
+  A.P.open = false; A.P.owner = null;
+  fire("pointerdown", { pointerType: "touch" }); fire("click", { pointerType: "mouse" });
+  const c1 = A.P.open === true;
+  fire("pointerdown", { pointerType: "touch" }); fire("click", {});
+  const c2 = A.P.open === false;
+  fire("pointerdown", { pointerType: "mouse" }); fire("click", { pointerType: "mouse" });
+  const c3 = A.P.open === false;
+  check("タップでポップアップが開閉する(click の pointerType に依存しない)", !!ic && c1 && c2 && c3, `開く ${c1} / 閉じる ${c2} / マウス無視 ${c3}`);
 }
 
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて成功");

@@ -328,8 +328,12 @@ export function closePop(delay){
 export function bindPop(sp, ic, info){
   ic.addEventListener("pointerenter", e => { if (e.pointerType === "mouse") { P.byMouse = true; openPop(sp, ic); } });
   ic.addEventListener("pointerleave", e => { if (e.pointerType === "mouse") closePop(0); });
-  ic.addEventListener("click", e => {
-    if (e.pointerType === "mouse") return;
+  // WebKit ではタップ由来の click の pointerType が "mouse" になったり無かったりするため、直前の pointerdown の種別で判定する
+  let downType = "";
+  ic.addEventListener("pointerdown", e => { downType = e.pointerType || ""; });
+  ic.addEventListener("click", () => {
+    const t = downType; downType = "";
+    if (t === "mouse") return; // マウスは pointerenter/pointerleave で開閉する
     if (P.open && P.sp === sp) closePop(0); else { P.byMouse = false; openPop(sp, ic); }
   });
   ic.addEventListener("focus", () => { let kb = true; try { kb = ic.matches(":focus-visible"); } catch (err) {} if (kb) { P.byMouse = false; openPop(sp, ic); } });
