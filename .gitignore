@@ -5,3 +5,5 @@ node_modules/
 
 # 描画ログの基準(10MB 超のため除外。ハッシュ tests/baseline/drawlog.sha256 のみ管理)
 tests/baseline/drawlog.log.gz
+PLAN.md
+PLAN-log.md
