@@ -1,7 +1,7 @@
 // Service Worker:全ファイルを事前キャッシュして、オフラインでも起動できるようにする。
 // 更新するとき(js/・index.html・icons/ などを変えたとき)は、CACHE_VERSION を上げること。
 // 新しいファイルを足したときは PRECACHE にも足すこと(tests/smoke.mjs が漏れを検出する)。
-const CACHE_VERSION = "v4";
+const CACHE_VERSION = "v5";
 const CACHE = `aquarium-${CACHE_VERSION}`;
 const FONT_CACHE = "aquarium-fonts"; // Google Fonts の実行時キャッシュ。バージョンを上げても消さない
 const PRECACHE = [
