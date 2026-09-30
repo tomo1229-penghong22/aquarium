@@ -7,6 +7,7 @@
   "scripts": {
     "test": "node tests/smoke.mjs",
     "drawlog": "node tests/drawlog.mjs",
+    "school": "node tests/school-metric.mjs",
     "serve": "python3 -m http.server 8000"
   },
   "engines": {

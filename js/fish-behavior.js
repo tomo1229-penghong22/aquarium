@@ -3,6 +3,10 @@ import { TAU, Tw, U, W, bottomY, clamp, counts, lerp, timeScale, waterTop } from
 import { ORDER, SPECIES } from "./species.js";
 import { spawnBubble } from "./scene.js";
 
+/* 群れる種(school > 0.5)の形の調整。前後方向に一列に並ばないようにする */
+const SCHOOL_VSPREAD = 1.0; // 目標位置の縦の散らばり(従来 0.6)
+const SCHOOL_FORE = 1.3;  // 進行方向の前後で分離が効く距離の倍率(1 で従来どおり円形)
+
 /* ---------------- 魚の生成 ---------------- */
 export const fishes = [];
 export const schools = {};
@@ -118,7 +122,8 @@ export function updateFish(f, dt){
     const n = counts[f.sp];
     const spread = (40 + Math.sqrt(n) * 22) * U;
     tx = lerp(f.tx, s.cx + f.ox * spread * 1.4, S.school);
-    ty = lerp(f.ty, s.cy + f.oy * spread * 0.6, S.school);
+    // 群れる種は縦の散らばりを大きくして、進行方向に細長い一列に見えないようにする(他の種は従来どおり 0.6)
+    ty = lerp(f.ty, s.cy + f.oy * spread * (S.school > 0.5 ? SCHOOL_VSPREAD : 0.6), S.school);
     // 高水温:水面へ。低水温:底寄りに沈みがち
     ty = lerp(ty, waterTop + (12 + Math.abs(f.oy) * 30) * U, hot * 0.85);
     if (f.health < 0.3) ty = lerp(ty, bottomY(f.x, f.z) - L * 0.5, (0.3 - f.health) / 0.3 * (hot > 0 ? 0.25 : 0.8));
@@ -134,11 +139,17 @@ export function updateFish(f, dt){
 
   // 群れ:分離と整列
   let sepx = 0, sepy = 0, alx = 0, aly = 0, an = 0;
+  const flock = S.school > 0.5, hv = Math.hypot(f.vx, f.vy) || 1, hx = f.vx / hv, hy = f.vy / hv; // 進行方向の単位ベクトル
   for (const o of fishes) {
     if (o === f) continue;
     const ox = f.x - o.x, oy = f.y - o.y, dd = ox * ox + oy * oy;
     const rad = L * (o.sp === f.sp ? 1.0 : 0.8);
-    if (dd < rad * rad && dd > 0.01) { const k = (rad - Math.sqrt(dd)) / rad; sepx += ox * k; sepy += oy * k; }
+    if (flock && o.sp === f.sp && dd > 0.01) {
+      // 群れる種の同種間:進行方向の前後は分離半径を長くして(楕円)、数珠つなぎの等間隔を崩す
+      const al = ox * hx + oy * hy, pe = oy * hx - ox * hy;
+      const de = Math.sqrt(al * al / (SCHOOL_FORE * SCHOOL_FORE) + pe * pe);
+      if (de < rad) { const k = (rad - de) / rad; sepx += ox * k; sepy += oy * k; }
+    } else if (dd < rad * rad && dd > 0.01) { const k = (rad - Math.sqrt(dd)) / rad; sepx += ox * k; sepy += oy * k; }
     if (o.sp === f.sp && dd < (L * 5) ** 2) { alx += o.vx; aly += o.vy; an++; }
   }
   desx += sepx * 1.6; desy += sepy * 1.6;
