@@ -139,7 +139,10 @@ export function updateFish(f, dt){
 
   // 群れ:分離と整列
   let sepx = 0, sepy = 0, alx = 0, aly = 0, an = 0;
-  const flock = S.school > 0.5, hv = Math.hypot(f.vx, f.vy) || 1, hx = f.vx / hv, hy = f.vy / hv; // 進行方向の単位ベクトル
+  // 進行方向の単位ベクトル。速度が基準速度の 10% 未満だと向きがノイズになる(0 だと向きが定まらず、全同種から押される)ので、
+  // そのときは従来の円形の分離にする(10% は school-metric.mjs で「ほぼ静止」とみなす値と同じ)
+  const hv = Math.hypot(f.vx, f.vy), hx = f.vx / (hv || 1), hy = f.vy / (hv || 1);
+  const flock = S.school > 0.5 && hv >= 0.1 * S.speed * U;
   for (const o of fishes) {
     if (o === f) continue;
     const ox = f.x - o.x, oy = f.y - o.y, dd = ox * ox + oy * oy;
