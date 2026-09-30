@@ -86,7 +86,7 @@ function main(argv) {
   log(`前回のリリース: ${last.slice(0, 7)}\nリリースする変更(${files.length} ファイル):\n${files.map(f => "  " + f).join("\n")}`);
 
   // 5. テスト
-  log("\nnpm test を実行します(2〜3 分)...");
+  log("\nnpm test を実行します(約 30 秒)...");
   const t = spawnSync("npm", ["test"], { cwd: ROOT, stdio: "inherit", shell: true });
   if (t.status !== 0) throw new Abort("中止:npm test が失敗しました。");
   log("✓ npm test 成功");
