@@ -76,7 +76,7 @@ package.json          npm test / npm run serve
 - **`resize()` で情景を作り直す。** 配置はシード固定の乱数なので、同じサイズなら同じ配置になる。魚の位置は比率で引き継ぐ。
 - **新しい行動や仕草を足したら、テストの `ACTS` にも追加する。**(`tests/smoke.mjs` と `tests/drawlog.mjs` の両方)
 - **モジュールのトップレベルの実行順を変えない。** `main.js` が import する順(species → core → fish-render → scene → fish-behavior → popup → ui)で各モジュールが評価され、最後に `main.js` の「開始」が走る。トップレベルで乱数や Canvas を使う処理を足すと、描画ログの基準(`tests/baseline/`)と食い違う。
-- **ファイルを足したり変えたりしたら、`sw.js` を更新する。** `js/` に .js を足す、`icons/` に PNG を足す、`index.html` などを変える、のどれでも、`sw.js` の `PRECACHE` に足し(漏れは `npm test` が検出する)、`CACHE_VERSION` を上げる。上げ忘れると、インストール済みの端末(特に iPad/iPhone のホーム画面)が古いキャッシュのまま起動する。
+- **ファイルを足したり変えたりしたら、`sw.js` を更新する。** `js/` に .js を足す、`icons/` に PNG を足す、`index.html` などを変える、のどれでも、`sw.js` の `PRECACHE` に手で足す(漏れは `npm test` が検出する)。変更をコミットしたら `npm run release`(確認は `--dry-run`)で `CACHE_VERSION` を上げて公開する(手で上げない)。上げ忘れると、インストール済みの端末(特に iPad/iPhone のホーム画面)が古いキャッシュのまま起動する。
 - **パスは相対で書く。** GitHub Pages ではサブパス(`/<repo>/`)で配信される。`/js/...` のようなルート絶対パスは使わず、`./` か `js/...` で書く(`index.html`・`manifest.webmanifest`・`sw.js` とも)。
 - **`sw.js` はルートに置く。** スコープは置き場所で決まるため、`js/` などに移すとルートのページを制御できない。
 - **`env(safe-area-inset-*)` の余白は消さない。** standalone 表示(`black-translucent`)ではノッチやホームバーの下まで描画されるため、`:root` の padding と全画面時の操作ボタンの位置で避けている。通常のブラウザでは値が 0 になり、見た目は変わらない。
