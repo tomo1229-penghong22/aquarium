@@ -14,7 +14,7 @@
 | `js/core.js` | ユーティリティ(`TAU`、`clamp`、`lerp`、`mulberry`、`noise1`、`mix`)、`W` `H` `U` `DPR` `waterTop`、`ctx`、`Tset` `Tw` `timeScale` `nightOn` `nightT`、`counts`、保存と復元、`sandY` `bottomY` `current`、セッター |
 | `js/fish-render.js` | 描画ヘルパ、`BASE_A`、`EYE`、`PAINT`、`drawFish` |
 | `js/fish-behavior.js` | `fishes`、`schools`、`makeFish`、`syncFish`、`updateHealth`、`updateSchools`、`updateFish` |
-| `js/scene.js` | `buildScene`、`makeStatic`、水草・流木・岩・浮草の描画、コースティクス・光の筋・水面、温度計、LED・色調補正・ガラス、エアストーン・泡・粒子 |
+| `js/scene.js` | `buildScene`、`makeStatic`、水草・流木・岩・浮草の描画、コースティクス・光の筋・水面、温度計、24時間計(`clockHourAngle`、`drawClock`)、LED・色調補正・ガラス、エアストーン・泡・粒子 |
 | `js/popup.js` | 拡大ポップアップ(`P`、`startAct`、`updatePop`、`drawPop`、`openPop` / `closePop`) |
 | `js/ui.js` | パネル、全画面表示、`updatePanel` |
 | `js/perf.js` | `?perf` のときだけ有効な性能計測(`PERF`、`perfBegin` / `perfMark` / `perfEnd` / `perfFrame` / `perfReport`)。ほかに依存しない |
@@ -139,7 +139,8 @@ loop(毎フレーム)
 15. 色調補正(`grade()`。夜は `nightGrade()` で乗算・スクリーン・ソフトライト)
 16. LED 照明の器具
 17. 温度計
-18. ガラスの映り込みと周辺減光
+18. 24時間計(温度計とガラスの間。端末のローカル時刻)
+19. ガラスの映り込みと周辺減光
 
 ## 魚の描き方
 
@@ -175,6 +176,7 @@ loop(毎フレーム)
 
 1. `npm test`:ブラウザなしで実行時エラー・NaN・体調モデル・ポップアップの詰まり・餌を食べられるかを確かめる(所要 約 30 秒)。Canvas と DOM のモックをグローバルに置いてから `js/main.js` を import する方式で、内部状態には各モジュールの export 経由でアクセスする。
    - 見た目を変えない変更(分割・整理など)では、`npm run drawlog` も実行する。描画命令の列を `tests/baseline/` の基準ログと比べ、一致すれば描画結果は同一(所要 約 40〜50 秒)。基準の `drawlog.log.gz` はリポジトリ外で、ハッシュ `drawlog.sha256` だけを管理する。
+   - `drawlog` は 24時間計が現在時刻に依存するため、`TZ=UTC`・固定時刻 6:30(UTC)で実行する。実行環境のタイムゾーンや時刻に描画ログが左右されない。
    - 群れの形を確かめるときは `npm run school`。
 2. `npm run serve` → `http://localhost:8000/`:見た目と操作を確認する(`file://` では開けない)。チェックしたい点の例:
    - 昼と夜の切り替え、18℃・25℃・34℃ での魚の様子
