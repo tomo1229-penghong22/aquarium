@@ -1,10 +1,10 @@
 // 描画順(draw)・毎フレームの更新(loop)・リサイズ・開始処理。
 // このファイルがエントリポイント。全モジュールの評価が終わってから、末尾の「開始」が実行される。
-import { DPR, H, Tset, Tw, W, clamp, ctx, cv, lerp, nightOn, nightT, sandY, setDPR, setH, setNightT, setTw, setU, setW, setWaterTop, tankEl, timeScale, waterTop } from "./core.js";
+import { DPR, H, Tset, Tw, W, clamp, ctx, cv, nightOn, nightT, setDPR, setH, setNightT, setTw, setU, setW, setWaterTop, tankEl, timeScale, waterTop } from "./core.js";
 import { ORDER } from "./species.js";
 import { drawFish } from "./fish-render.js";
 import { fishes, schools, syncFish, updateFish, updateHealth, updateSchools } from "./fish-behavior.js";
-import { bubbles, buildScene, cc, computeCaustics, drawBubbles, drawCarpet, drawClock, drawFern, drawFixture, drawFloats, drawGlass, drawLotus, drawMoss, drawMotes, drawRays, drawRibbon, drawRock, drawStem, drawSurface, drawSword, drawThermometer, drawWood, grade, plants, rocks, setCCol, staticLayer, staticNight, updateBubbles } from "./scene.js";
+import { bubbles, buildScene, drawBubbles, drawCarpet, drawCaustics, drawClock, drawFern, drawFixture, drawFloats, drawGlass, drawLotus, drawMoss, drawMotes, drawRays, drawRibbon, drawRock, drawStem, drawSurface, drawSword, drawThermometer, drawWood, grade, plants, rocks, staticLayer, staticNight, updateBubbles } from "./scene.js";
 import { updatePanel } from "./ui.js";
 import { PERF, perfBegin, perfEnd, perfFrame, perfMark, perfReport } from "./perf.js";
 
@@ -49,14 +49,7 @@ function draw(){
   drawMotes(T);
   if (PERF) perfMark("motes");
   // 揺らめく光の網目(魚にも水草にも砂にも落ちる)
-  if (frameNo % 2 === 0) computeCaustics(T * 0.45 + 23);
-  ctx.save(); ctx.globalCompositeOperation = "screen";
-  ctx.globalAlpha = lerp(0.25, 0.34, nightT); ctx.drawImage(cc, 0, waterTop, W, H - waterTop);
-  ctx.beginPath(); ctx.moveTo(0, H);
-  for (let x = 0; x <= W; x += 10) ctx.lineTo(x, sandY(x));
-  ctx.lineTo(W, H); ctx.closePath(); ctx.clip();
-  ctx.globalAlpha = lerp(0.32, 0.42, nightT); ctx.drawImage(cc, -W * 0.1, H * 0.7, W * 1.2, H * 0.3);
-  ctx.restore();
+  drawCaustics(T);
   if (PERF) perfMark("caustics");
   drawSurface(T);
   if (PERF) perfMark("surface");
@@ -78,8 +71,6 @@ function loop(now){
   const rate = 0.6 * Math.sqrt(timeScale);
   if (Math.abs(Tset - Tw) > 0.001) setTw(Tw + clamp(Tset - Tw, -rate * dt, rate * dt));
   setNightT(clamp(nightT + (nightOn ? dt : -dt) / 1.4, 0, 1));
-  const cn = nightT;
-  setCCol([Math.round(lerp(255, 228, cn)), Math.round(lerp(248, 240, cn)), Math.round(lerp(222, 255, cn))]);
   if (PERF) perfBegin();
   updateSchools(dt);
   fishes.forEach(f => { updateHealth(f, dt); updateFish(f, dt); });

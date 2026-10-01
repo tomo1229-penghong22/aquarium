@@ -117,15 +117,16 @@ export function buildScene(){
     floats.push({ x, leaves, roots, k: r() * 10 });
   }
   glints = [];
-  for (let i = 0; i < 46; i++) glints.push({ x: r() * W, k: r() * 50, s: 0.8 + r() * 1.6, f: 0.8 + r() * 1.5 });
+  for (let i = 0; i < 46; i++) { const gl = { x: r() * W, k: r() * 50, s: 0.8 + r() * 1.6, f: 0.8 + r() * 1.5 }; if (i < 20) glints.push(gl); } // 採用は 20 個。以降の配置(玉ボケ・筋・粒)を動かさないため、乱数は 46 個ぶん消費する
   orbs = [];
   for (let i = 0; i < 9; i++) orbs.push({ x: r() * W, y: waterTop + r() * H * 0.5, rad: (18 + r() * 40) * U, k: r() * 50 });
   // 光の筋(やや左上からの自然光)
   rays = [];
-  for (let i = 0; i < 7; i++) rays.push({ x: W * (0.05 + i * 0.15 + r() * 0.06), w: (40 + r() * 70) * U, slant: -H * (0.12 + r() * 0.08), k: r() * 50 });
+  for (let i = 0; i < 7; i++) { const ry = { x: W * (0.05 + i * 0.15 + r() * 0.06), w: (40 + r() * 70) * U, slant: -H * (0.12 + r() * 0.08), k: r() * 50 }; if (i % 3 !== 2) rays.push(ry); } // 採用は 5 本(i=0,1,3,4,6)。乱数は 7 本ぶん消費する
   motes = [];
   for (let i = 0; i < 60; i++) motes.push({ x: r() * W, y: waterTop + r() * (H * 0.78 - waterTop), s: 0.6 + r() * 1.3, a: 0.12 + r() * 0.25, k: r() * 100 });
   buildStatic();
+  buildLight();
 }
 
 function makeStatic(N){
@@ -400,49 +401,126 @@ export function drawRock(r){
 }
 
 /* ---------------- 光・水面 ---------------- */
-export const cc = document.createElement("canvas"); cc.width = 150; cc.height = 90;
-const cctx = cc.getContext("2d"); const cimg = cctx.createImageData(150, 90);
-let cCol = [255, 248, 222];
-export function setCCol(c){ cCol = c; }
-export function computeCaustics(time){
-  const d = cimg.data, cw = 150, ch = 90;
+// 光の素材は作り置き(毎フレームは drawImage と、作り置きのグラデーションの fill だけ)。
+// buildLight() が buildScene の最後(resize のたび)に呼ばれる。コースティクスと LED 暗幕の素材は大きさに依存しないので一度だけ作る。
+const lit = { caus: null, nightMul: null, ray: null, orb: null, g: null };
+const CAUS_TILE = 188;   // コースティクス 1 タイル(2*TAU を 188 画素 = 元の 1 画素あたり 0.067rad と同じ細かさ)
+const CAUS_LAYERS = [    // 2 枚を別方向・別速度に流し、screen で重ねる(sx, sy, vx, vy は素材画素単位。sw, sh は窓の大きさ)
+  { phase: 23, sw: 150, sh: 90, vx: 5, vy: 1.6, ox: 0, oy: 0 },
+  { phase: 71, sw: 180, sh: 108, vx: -3.6, vy: 0.9, ox: 60, oy: 40 },
+];
+function mkCanvas(w, h){ const c = document.createElement("canvas"); c.width = w; c.height = h; return [c, c.getContext("2d")]; }
+// 一度だけ使う画素計算(元の computeCaustics と同じ式。タイルの継ぎ目が出ないよう、明示の px/py は定数 -250 にして周期にした)
+function causticsMask(time){
+  const n = CAUS_TILE, [c, g] = mkCanvas(n, n), img = g.createImageData(n, n), d = img.data;
   let k = 0;
-  for (let j = 0; j < ch; j++) {
-    for (let i = 0; i < cw; i++) {
-      const px = (i / cw) * TAU * 1.6 - 250, py = (j / ch) * TAU * 1.0 - 250;
-      let ix = px, iy = py, c = 1;
-      for (let n = 0; n < 4; n++) {
-        const tt = time * (1 - 3.5 / (n + 1));
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      const px = (i / n) * TAU * 2 - 250, py = (j / n) * TAU * 2 - 250;
+      let ix = px, iy = py, cs = 1;
+      for (let m = 0; m < 4; m++) {
+        const tt = time * (1 - 3.5 / (m + 1));
         const nix = px + Math.cos(tt - ix) + Math.sin(tt + iy);
         const niy = py + Math.sin(tt - iy) + Math.cos(tt + ix);
         ix = nix; iy = niy;
-        const a = px / (Math.sin(ix + tt) / 0.005), b = py / (Math.cos(iy + tt) / 0.005);
-        c += 1 / Math.sqrt(a * a + b * b);
+        const a = -250 / (Math.sin(ix + tt) / 0.005), b = -250 / (Math.cos(iy + tt) / 0.005);
+        cs += 1 / Math.sqrt(a * a + b * b);
       }
-      c /= 4; c = 1.17 - Math.pow(c, 1.4);
-      const v = Math.pow(Math.abs(c), 8);
-      d[k] = cCol[0]; d[k + 1] = cCol[1]; d[k + 2] = cCol[2]; d[k + 3] = Math.min(255, v * 300);
+      cs /= 4; cs = 1.17 - Math.pow(cs, 1.4);
+      const v = Math.pow(Math.abs(cs), 8);
+      d[k] = 255; d[k + 1] = 255; d[k + 2] = 255; d[k + 3] = Math.min(255, v * 300);
       k += 4;
     }
   }
-  cctx.putImageData(cimg, 0, 0);
+  g.putImageData(img, 0, 0);
+  return c;
+}
+// 白い素材(alpha だけ持つ)を色付きにする(source-in)。tile = true なら 2x2 に並べ、窓がタイルの継ぎ目をまたいでも切れないようにする
+function tint(src, col, tile){
+  const w = src.width * (tile ? 2 : 1), h = src.height * (tile ? 2 : 1), [c, g] = mkCanvas(w, h);
+  if (tile) { for (let y = 0; y < 2; y++) for (let x = 0; x < 2; x++) g.drawImage(src, x * src.width, y * src.height); } else g.drawImage(src, 0, 0);
+  g.globalCompositeOperation = "source-in"; g.fillStyle = col; g.fillRect(0, 0, w, h);
+  return c;
+}
+const CAUS_COL = ["rgb(255,248,222)", "rgb(228,240,255)"], RAY_COL = ["rgb(255,244,210)", "rgb(226,238,255)"];
+function buildLight(){
+  if (!lit.caus) {
+    lit.caus = CAUS_LAYERS.map(L => { const m = causticsMask(L.phase); return CAUS_COL.map(col => tint(m, col, true)); });
+    // LED の暗幕:縦(上が明るく下ほど暗い)と横(左右の端ほど暗い)の multiply を 1 枚に焼く(元の 2 回の multiply と同じ積)
+    const NW = 128, NH = 96, [c, g] = mkCanvas(NW, NH), img = g.createImageData(NW, NH), d = img.data;
+    const stops = (v, st) => { for (let i = 1; i < st.length; i++) if (v <= st[i][0]) { const f = (v - st[i - 1][0]) / (st[i][0] - st[i - 1][0]); return st[i - 1][1].map((x, q) => lerp(x, st[i][1][q], f)); } return st[st.length - 1][1]; };
+    const vs = [[0, [246, 249, 255]], [0.45, [196, 209, 228]], [1, [111, 128, 160]]], hs = [[0, [154, 167, 189]], [0.1, [255, 255, 255]], [0.9, [255, 255, 255]], [1, [154, 167, 189]]];
+    let k = 0;
+    for (let j = 0; j < NH; j++) {
+      const cv = stops(j / (NH - 1), vs);
+      for (let i = 0; i < NW; i++) { const ch = stops(i / (NW - 1), hs); d[k] = cv[0] * ch[0] / 255; d[k + 1] = cv[1] * ch[1] / 255; d[k + 2] = cv[2] * ch[2] / 255; d[k + 3] = 255; k += 4; }
+    }
+    g.putImageData(img, 0, 0); lit.nightMul = c;
+  }
+  // 光の筋 1 本ぶん(横はやわらかく、下ほど広がり、縦は薄くなる)。昼用・夜用
+  const RW = 96, RH = 192, [rc, rg] = mkCanvas(RW, RH), rimg = rg.createImageData(RW, RH), rd = rimg.data;
+  let q = 0;
+  for (let j = 0; j < RH; j++) {
+    const v = j / (RH - 1), vp = v < 0.6 ? lerp(1, 0.35, v / 0.6) : lerp(0.35, 0, (v - 0.6) / 0.4), hw = lerp(0.8, 1.5, v) / 1.5 * (RW / 2);
+    for (let i = 0; i < RW; i++) {
+      const u = (i + 0.5 - RW / 2) / hw, p = Math.abs(u) < 1 ? (1 - u * u) * (1 - u * u) : 0;
+      rd[q] = 255; rd[q + 1] = 255; rd[q + 2] = 255; rd[q + 3] = vp * p * 255; q += 4;
+    }
+  }
+  rg.putImageData(rimg, 0, 0);
+  lit.ray = RAY_COL.map(col => tint(rc, col, false));
+  // 玉ボケ 1 個ぶん(中心が濃く、縁へ消える)。alpha は描くときの globalAlpha で掛ける
+  const OS = 128, [oc, og] = mkCanvas(OS, OS), og1 = og.createRadialGradient(OS / 2, OS / 2, 0, OS / 2, OS / 2, OS / 2);
+  og1.addColorStop(0, "rgba(255,250,225,1)"); og1.addColorStop(0.7, "rgba(255,250,225,0.6)"); og1.addColorStop(1, "rgba(255,250,225,0)");
+  og.fillStyle = og1; og.fillRect(0, 0, OS, OS); lit.orb = oc;
+  // 画面の大きさに依存するグラデーション(resize のたびに作り直し、毎フレームは fillStyle に代入するだけ)
+  const G = {};
+  G.skyDay = ctx.createLinearGradient(0, 0, 0, waterTop); G.skyDay.addColorStop(0, "#fbf6e6"); G.skyDay.addColorStop(1, "#dcebe0");
+  G.skyNight = ctx.createLinearGradient(0, 0, 0, waterTop); G.skyNight.addColorStop(0, "#0b1113"); G.skyNight.addColorStop(1, "#2a3c41");
+  G.band = ctx.createLinearGradient(0, waterTop, 0, waterTop + 22 * U); G.band.addColorStop(0, "rgba(255,255,240,0.5)"); G.band.addColorStop(1, "rgba(255,255,240,0)");
+  G.nightSL = ctx.createLinearGradient(0, 0, 0, H); G.nightSL.addColorStop(0, "rgba(225,238,255,0.42)"); G.nightSL.addColorStop(1, "rgba(10,25,60,0.4)");
+  G.daySL = ctx.createLinearGradient(0, 0, 0, H);
+  G.daySL.addColorStop(0, "rgba(255,222,165,0.5)"); G.daySL.addColorStop(0.5, "rgba(255,255,255,0)"); G.daySL.addColorStop(1, "rgba(25,75,125,0.45)");
+  G.dayGlow = ctx.createRadialGradient(W * 0.3, waterTop, 0, W * 0.3, waterTop, W * 0.45);
+  G.dayGlow.addColorStop(0, "rgba(255,240,205,0.16)"); G.dayGlow.addColorStop(1, "rgba(255,240,205,0)");
+  lit.g = G;
+}
+const wrap = (v, n) => ((v % n) + n) % n;
+// 揺らめく光の網目:2 枚のテクスチャを別方向に流して screen で重ねる(魚にも水草にも砂にも落ちる)。昼用・夜用を nightT で混ぜる
+export function drawCaustics(t){
+  if (!lit.caus) return;
+  const n = nightT;
+  ctx.save(); ctx.globalCompositeOperation = "screen";
+  const aTop = lerp(0.25, 0.34, n) * 0.62, aSand = lerp(0.32, 0.42, n) * 0.62;
+  const win = CAUS_LAYERS.map(L => [wrap(L.ox + t * L.vx, CAUS_TILE), wrap(L.oy + t * L.vy, CAUS_TILE), L.sw, L.sh]);
+  const vars = [[0, 1 - n], [1, n]].filter(v => v[1] > 0.001);
+  vars.forEach(([vi, f]) => lit.caus.forEach((tex, li) => {
+    const [sx, sy, sw, sh] = win[li];
+    ctx.globalAlpha = aTop * f; ctx.drawImage(tex[vi], sx, sy, sw, sh, 0, waterTop, W, H - waterTop);
+  }));
+  ctx.beginPath(); ctx.moveTo(0, H);
+  for (let x = 0; x <= W; x += 10) ctx.lineTo(x, sandY(x));
+  ctx.lineTo(W, H); ctx.closePath(); ctx.clip();
+  vars.forEach(([vi, f]) => lit.caus.forEach((tex, li) => {
+    const [sx, sy, sw, sh] = win[li];
+    ctx.globalAlpha = aSand * f; ctx.drawImage(tex[vi], sx, sy, sw, sh, -W * 0.1, H * 0.7, W * 1.2, H * 0.3);
+  }));
+  ctx.restore();
 }
 export function drawRays(t){
+  if (!lit.ray) return;
   ctx.save(); ctx.globalCompositeOperation = "screen";
-  const n = nightT, col = `${Math.round(lerp(255, 226, n))},${Math.round(lerp(244, 238, n))},${Math.round(lerp(210, 255, n))}`;
-  const beam = (x0, x1, w0, w1, a, yb) => {
-    const g = ctx.createLinearGradient(0, waterTop, 0, yb);
-    g.addColorStop(0, `rgba(${col},${a})`); g.addColorStop(0.6, `rgba(${col},${a * 0.35})`); g.addColorStop(1, `rgba(${col},0)`);
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.moveTo(x0 - w0, waterTop); ctx.lineTo(x0 + w0, waterTop); ctx.lineTo(x1 + w1, yb); ctx.lineTo(x1 - w1, yb); ctx.closePath(); ctx.fill();
-  };
+  const n = nightT, yb = H * 0.85, hb = yb - waterTop;
   rays.forEach(r => {
     const a = 0.06 + 0.11 * noise1(t * 0.18 + r.k);
     const drift = Math.sin(t * 0.1 + r.k) * 20 * U;
     const x0 = r.x + drift, x1 = r.x + r.slant * (1 - n) + drift * 1.5;
-    const ws = lerp(1, 0.55, n), am = lerp(1, 0.8, n);
-    beam(x0, x1, r.w * 0.8 * ws, r.w * 1.5 * ws, a * 0.55 * am, H * 0.9);
-    beam(x0, x1, r.w * 0.25 * ws, r.w * 0.5 * ws, a * 0.9 * am, H * lerp(0.7, 0.8, n));
+    const ws = lerp(1, 0.55, n), am = lerp(1, 0.8, n), wd = r.w * 1.5 * ws * 2 * 0.9;
+    ctx.save();
+    ctx.transform(1, 0, (x1 - x0) / hb, 1, x0 - wd / 2, waterTop);
+    if (n < 0.999) { ctx.globalAlpha = a * 1.3 * am * (1 - n); ctx.drawImage(lit.ray[0], 0, 0, wd, hb); }
+    if (n > 0.001) { ctx.globalAlpha = a * 1.3 * am * n; ctx.drawImage(lit.ray[1], 0, 0, wd, hb); }
+    ctx.restore();
   });
   ctx.restore();
 }
@@ -458,13 +536,11 @@ export function drawSurface(t){
   ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, surfaceY(0, t));
   for (let x = 0; x <= W; x += 8) ctx.lineTo(x, surfaceY(x, t));
   ctx.lineTo(W, 0); ctx.closePath();
-  const ga = ctx.createLinearGradient(0, 0, 0, waterTop);
-  ga.addColorStop(0, mix("#fbf6e6", "#0b1113", nightT)); ga.addColorStop(1, mix("#dcebe0", "#2a3c41", nightT));
-  ctx.fillStyle = ga; ctx.fill();
+  const G = lit.g, a0 = ctx.globalAlpha;
+  if (nightT < 0.999) { ctx.fillStyle = G.skyDay; ctx.fill(); }
+  if (nightT > 0.001) { ctx.globalAlpha = a0 * nightT; ctx.fillStyle = G.skyNight; ctx.fill(); ctx.globalAlpha = a0; }
   // 水面の裏側に映る明るい帯
-  const g = ctx.createLinearGradient(0, waterTop, 0, waterTop + 22 * U);
-  g.addColorStop(0, "rgba(255,255,240,0.5)"); g.addColorStop(1, "rgba(255,255,240,0)");
-  ctx.fillStyle = g; ctx.fillRect(0, waterTop - 2 * U, W, 24 * U);
+  ctx.fillStyle = G.band; ctx.fillRect(0, waterTop - 2 * U, W, 24 * U);
   ctx.strokeStyle = "rgba(255,255,250,0.85)"; ctx.lineWidth = 1.3 * U;
   ctx.beginPath(); ctx.moveTo(0, surfaceY(0, t));
   for (let x = 0; x <= W; x += 8) ctx.lineTo(x, surfaceY(x, t));
@@ -564,22 +640,12 @@ export function drawClock(){
 function nightGrade(n){
   ctx.save();
   ctx.globalAlpha = n;
-  // LEDの光は上から届き、下や端ほど暗くなる
+  // LEDの光は上から届き、下や端ほど暗くなる(作り置きの暗幕を multiply で 1 回)
   ctx.globalCompositeOperation = "multiply";
-  let g = ctx.createLinearGradient(0, waterTop, 0, H);
-  g.addColorStop(0, "#f6f9ff"); g.addColorStop(0.45, "#c4d1e4"); g.addColorStop(1, "#6f80a0");
-  ctx.fillStyle = g; ctx.fillRect(0, waterTop, W, H - waterTop);
-  g = ctx.createLinearGradient(0, 0, W, 0);
-  g.addColorStop(0, "#9aa7bd"); g.addColorStop(0.1, "#ffffff"); g.addColorStop(0.9, "#ffffff"); g.addColorStop(1, "#9aa7bd");
-  ctx.fillStyle = g; ctx.fillRect(0, waterTop, W, H - waterTop);
-  ctx.globalCompositeOperation = "screen";
-  g = ctx.createLinearGradient(0, waterTop, 0, H * 0.4);
-  g.addColorStop(0, "rgba(235,245,255,0.22)"); g.addColorStop(1, "rgba(235,245,255,0)");
-  ctx.fillStyle = g; ctx.fillRect(W * 0.04, waterTop, W * 0.92, H * 0.4);
+  ctx.drawImage(lit.nightMul, 0, waterTop, W, H - waterTop);
+  // 上は青白く明るく、下は暗い青へ(soft-light を 1 回)
   ctx.globalCompositeOperation = "soft-light";
-  g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, "rgba(225,238,255,0.35)"); g.addColorStop(1, "rgba(10,25,60,0.4)");
-  ctx.fillStyle = g; ctx.fillRect(0, waterTop, W, H - waterTop);
+  ctx.fillStyle = lit.g.nightSL; ctx.fillRect(0, waterTop, W, H - waterTop);
   ctx.restore();
 }
 export function drawFixture(t){
@@ -624,13 +690,9 @@ export function grade(){
   ctx.save();
   ctx.globalAlpha = 1 - nightT;
   ctx.globalCompositeOperation = "soft-light";
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, "rgba(255,222,165,0.5)"); g.addColorStop(0.5, "rgba(255,255,255,0)"); g.addColorStop(1, "rgba(25,75,125,0.45)");
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = lit.g.daySL; ctx.fillRect(0, 0, W, H);
   ctx.globalCompositeOperation = "screen";
-  const b = ctx.createRadialGradient(W * 0.3, waterTop, 0, W * 0.3, waterTop, W * 0.45);
-  b.addColorStop(0, "rgba(255,240,205,0.16)"); b.addColorStop(1, "rgba(255,240,205,0)");
-  ctx.fillStyle = b; ctx.fillRect(0, 0, W, H * 0.6);
+  ctx.fillStyle = lit.g.dayGlow; ctx.fillRect(0, 0, W, H * 0.6);
   ctx.restore();
 }
 
@@ -661,14 +723,14 @@ export function drawBubbles(){
 }
 export function drawMotes(t){
   ctx.save(); ctx.globalCompositeOperation = "screen";
+  const a0 = ctx.globalAlpha;
   orbs.forEach(o => {
     const x = (o.x + t * 4 * U) % W, y = o.y + Math.sin(t * 0.2 + o.k) * 15 * U;
     const a = (0.05 + 0.05 * Math.sin(t * 0.3 + o.k)) * (1 - nightT);
     if (a < 0.003) return;
-    const g = ctx.createRadialGradient(x, y, 0, x, y, o.rad);
-    g.addColorStop(0, `rgba(255,250,225,${a})`); g.addColorStop(0.7, `rgba(255,250,225,${a * 0.6})`); g.addColorStop(1, "rgba(255,250,225,0)");
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, o.rad, 0, TAU); ctx.fill();
+    ctx.globalAlpha = a0 * a; ctx.drawImage(lit.orb, x - o.rad, y - o.rad, o.rad * 2, o.rad * 2);
   });
+  ctx.globalAlpha = a0;
   motes.forEach(m => {
     let x = (m.x + t * 3 * U + Math.sin(t * 0.3 + m.k) * 20 * U) % W; if (x < 0) x += W;
     const y = m.y + Math.sin(t * 0.25 + m.k * 2) * 12 * U;
