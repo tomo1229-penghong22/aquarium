@@ -1,6 +1,6 @@
 // 水槽の情景(配置・水草・光・水面・温度計・ガラス・エアストーン・泡)の生成と描画。
 import { DPR, H, TAU, Tw, U, W, clamp, ctx, current, lerp, mix, mulberry, nightT, noise1, sandY, waterTop } from "./core.js";
-import { agingOn, algaeGlass, algaeHard, clog, dirt, growth } from "./aging.js";
+import { DO, agingOn, algaeGlass, algaeHard, clog, dirt, growth } from "./aging.js";
 
 /* ---- 情景の状態(buildScene が作り直す) ---- */
 export let staticNight = null, staticLayer = null, plants = { back: [], mid: [], front: [] }, rocks = [];
@@ -129,6 +129,7 @@ export function buildScene(){
   buildStatic();
   buildLight();
   buildAging();
+  buildMeter();
 }
 
 function makeStatic(N){
@@ -839,6 +840,80 @@ export function drawClock(){
 }
 /* 24時間計の中心と半径(論理座標。canvas の CSS サイズと同じ単位) */
 export function clockGeom(){ return { x: W * 0.045, y: H - 46 * U, r: 28 * U }; }
+
+/* ---------------- 酸素メーター ---------------- */
+// 24時間計の右隣。溶存酸素 DO(mg/L)を、下が開いた 270° の目盛りの針で示す。針の角度は Canvas の角度(右=0°、時計回り):
+// 135°(左下)= 0 mg/L 〜 405°(右下)= 10 mg/L。DO が減ると針は左回り。範囲外は 0〜10 に丸める。
+export function o2NeedleAngle(d){ return 135 + 270 * clamp(d, 0, 10) / 10; }
+// 扇形の色の位置(mg/L)。7〜10 青 / 4.5 黄(低酸素行動の始まり)/ 0〜2 赤(3 未満で体調低下)。間は滑らかに
+const O2_STOPS = [[0, "#e0645c"], [2, "#e0645c"], [4.5, "#f1d25c"], [7, "#4aa3df"], [10, "#4aa3df"]];
+function o2ColorAt(d){
+  for (let i = 1; i < O2_STOPS.length; i++) if (d <= O2_STOPS[i][0]) {
+    const [d0, c0] = O2_STOPS[i - 1], [d1, c1] = O2_STOPS[i];
+    return mix(c0, c1, d1 > d0 ? (d - d0) / (d1 - d0) : 1);
+  }
+  return O2_STOPS[O2_STOPS.length - 1][1];
+}
+// 位置・大きさ:時計と同じ高さ・同じ半径で、中心を時計の中心の 66U 右(縁の間に約 10U)
+export function meterGeom(){ const c = clockGeom(); return { x: c.x + 66 * U, y: c.y, r: c.r }; }
+let meter = null; // { cv, ox, oy }:文字盤の作り置き(resize のたびに buildMeter が作り直す)
+export function buildMeter(){
+  const { x, y, r } = meterGeom();
+  const pad = 2 * U, top = r + 9 * U; // 文字盤の中心から作り置きの上端までの距離(吸盤の分を含む)
+  const lw = Math.ceil(2 * (r + pad)), lh = Math.ceil(top + r + pad);
+  const cv = document.createElement("canvas");
+  cv.width = Math.round(lw * DPR); cv.height = Math.round(lh * DPR);
+  const g = cv.getContext("2d");
+  g.scale(DPR, DPR);
+  const cx = lw / 2, cy = top;
+  // 吸盤・文字盤(半透明のガラス)・縁は時計(ON)と同じ
+  g.fillStyle = "rgba(235,245,245,0.45)";
+  g.beginPath(); g.ellipse(cx, cy - r - 3 * U, 9 * U, 5 * U, 0, 0, TAU); g.fill();
+  g.beginPath(); g.arc(cx, cy, r, 0, TAU);
+  g.fillStyle = "rgba(245,250,250,0.32)"; g.fill();
+  g.strokeStyle = "rgba(255,255,255,0.8)"; g.lineWidth = 1.5 * U; g.stroke();
+  // 270° の扇形(中心から 0.86r まで)を、多い方(右下・青)から少ない方(左下・赤)へ塗る
+  const a0 = 135 * Math.PI / 180, a1 = 405 * Math.PI / 180, fr = r * 0.86;
+  g.globalAlpha = 0.82;
+  const cg = typeof g.createConicGradient === "function" ? g.createConicGradient(a0, cx, cy) : null;
+  if (cg && typeof cg.addColorStop === "function") {
+    // 円錐グラデーションの位置は「1 周(360°)に対する割合」。扇形は 270° なので DO d の位置は 0.75 * d / 10
+    O2_STOPS.forEach(([d, c]) => cg.addColorStop(0.75 * d / 10, c));
+    g.fillStyle = cg;
+    g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, fr, a0, a1); g.closePath(); g.fill();
+  } else {
+    // 代替(createConicGradient がない環境):2° ずつの細い扇形で塗る。継ぎ目が出ないよう少し重ねる
+    const n = 135, da = (a1 - a0) / n;
+    for (let i = 0; i < n; i++) {
+      g.fillStyle = o2ColorAt((i + 0.5) / n * 10);
+      g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, fr, a0 + i * da, a0 + (i + 1) * da + 0.012); g.closePath(); g.fill();
+    }
+  }
+  g.globalAlpha = 1;
+  // 扇形の縁(うすい白)
+  g.strokeStyle = "rgba(255,255,255,0.55)"; g.lineWidth = 0.8 * U; g.lineJoin = "round";
+  g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, fr, a0, a1); g.closePath(); g.stroke();
+  // 文字(中央下の開いた部分)
+  g.fillStyle = "rgba(20,30,30,0.9)";
+  g.font = `600 ${Math.max(8, 8.5 * U)}px "Zen Kaku Gothic New", sans-serif`; g.textAlign = "center"; g.textBaseline = "middle";
+  g.fillText("O₂", cx, cy + r * 0.66);
+  meter = { cv, ox: x - cx, oy: y - cy };
+}
+export function drawO2Meter(){
+  if (!meter) return;
+  const { x, y, r } = meterGeom();
+  ctx.save();
+  ctx.drawImage(meter.cv, meter.ox, meter.oy, meter.cv.width / DPR, meter.cv.height / DPR);
+  // 針:時計の時針と同じ太さ(2U)。扇形のどの色の上でも読めるよう、濃い色に明るい縁取りを付ける
+  const a = o2NeedleAngle(DO) * Math.PI / 180, nx = x + Math.cos(a) * r * 0.72, ny = y + Math.sin(a) * r * 0.72;
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "rgba(240,243,243,0.85)"; ctx.lineWidth = 4.2 * U;
+  ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(nx, ny); ctx.stroke();
+  ctx.strokeStyle = "#364242"; ctx.lineWidth = 2 * U;
+  ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(nx, ny); ctx.stroke();
+  ctx.fillStyle = "#364242"; ctx.beginPath(); ctx.arc(x, y, 2.2 * U, 0, TAU); ctx.fill();
+  ctx.restore();
+}
 
 /* ---------------- ガラスの映り込み ---------------- */
 function nightGrade(n){

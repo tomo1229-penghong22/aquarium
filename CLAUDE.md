@@ -10,7 +10,7 @@
 - 水温 18〜34℃。水温に応じて行動と体調が変化する
 - 昼(自然光)/夜(白色LED)の照明モード
 - 魚アイコンにマウスを重ねる(iPad/iPhone などタッチ端末ではタップする)と、拡大した魚がポップアップで動く(ときどきユーモラスな仕草をする)
-- 水槽の左下にアナログの24時間計(端末のローカル時刻、時針のみ)
+- 水槽の左下にアナログの24時間計(端末のローカル時刻、時針のみ)と、その右隣に溶存酸素を示す酸素メーター(針と、青→黄→赤の扇形)
 - 全画面モード(ボタン/F キー/ダブルクリック、Esc で戻る)
 - 時間の経過(issue #2):24時間計(`#clockbtn`)のタップ/クリックでオン/オフ(既定オン)。オンの間は実時間で、ガラスの汚れ・苔・水草・フィルターの目詰まり・溶存酸素(低酸素で魚が水面に集まる)が変わり、東京の日の出・日没で照明が自動で切り替わる。水替え・清掃(2日)とフィルター掃除(60日)は実日付で数える。パネルから水槽をリセットできる。詳細は `docs/SPEC.md` の「11. 時間の経過」
 
@@ -64,7 +64,7 @@ package.json          npm test / drawlog / school / release / serve
 | `js/aging.js` | 時間経過の状態 | `agingOn`、`dirt` `algaeGlass` `algaeHard` `clog` `growth` `DO` `lastClean` `lastFilter`、`updateAging`(毎フレーム)、`checkMaintenance`(メンテ)、`DOsat` `hypoxia`、`sunTimes` `lightPhase`(日の出日没)、保存の登録(`initAging`)、確認用パラメータ(`parseAgingParam`・`applyAgingParam`。`?aging` 中は保存を凍結)。トップレベルで乱数・Canvas・`Date` を使わない |
 | `js/fish-render.js` | 描画ヘルパ | 体・尾・ひれのパス、`shade`(陰影と縁の光)、`eye`、`BASE_A`、`EYE`、`PAINT`(種ごとの描画関数)、`drawFish` |
 | `js/fish-behavior.js` | 魚の生成 / 体調・行動 | `fishes`、`schools`、`makeFish`、`syncFish`、`updateHealth`(DO < 3 で体調低下)、`updateFish`(群れ・分離・壁・温度と低酸素による層の移動)。群れる種(ネオン・ラミー)は縦の散らばり 1.0、前後に楕円の分離(1.3)、速度が基準の 10% 未満なら円形の分離 |
-| `js/scene.js` | 配置 / 水草の描画 / 光・水面 / 温度計 / 24時間計 / ガラスの映り込み / エアストーン・泡・浮遊物 | `buildScene()`(水草・岩・流木・浮草・光の筋などを乱数シード固定で生成)、`makeStatic()`(昼/夜の静的背景)、`spine`(水流で揺れる背骨)と各水草・流木・こけ・浮草の描画、コースティクス・光の筋・水面・玉ボケ(光の素材は `buildLight()` が作り置き。buildScene の最後に呼ばれる)、時間経過の見た目(`buildAging()`・`ensureAging()` がテクスチャを遅延生成、`drawAgingGlass`・`drawAgingHard`。乱数は別シード `AG_SEED`)、夜の照明、LED、色調補正、温度計、24時間計(`clockHourAngle`・`drawClock`・`clockGeom`。時間経過オフのときはグレー)、泡 |
+| `js/scene.js` | 配置 / 水草の描画 / 光・水面 / 温度計 / 24時間計 / 酸素メーター / ガラスの映り込み / エアストーン・泡・浮遊物 | `buildScene()`(水草・岩・流木・浮草・光の筋などを乱数シード固定で生成)、`makeStatic()`(昼/夜の静的背景)、`spine`(水流で揺れる背骨)と各水草・流木・こけ・浮草の描画、コースティクス・光の筋・水面・玉ボケ(光の素材は `buildLight()` が作り置き。buildScene の最後に呼ばれる)、時間経過の見た目(`buildAging()`・`ensureAging()` がテクスチャを遅延生成、`drawAgingGlass`・`drawAgingHard`。乱数は別シード `AG_SEED`)、夜の照明、LED、色調補正、温度計、24時間計(`clockHourAngle`・`drawClock`・`clockGeom`。時間経過オフのときはグレー)、酸素メーター(`o2NeedleAngle`・`drawO2Meter`・`meterGeom`。文字盤は `buildMeter()` が作り置き)、泡 |
 | `js/popup.js` | 拡大ポップアップ | 小さな水槽の状態 `P`、行動の状態機械(`startAct` / `updatePop`)、描画、開閉 |
 | `js/ui.js` | パネル / 全画面表示 / 時間経過の操作 | 魚の選択 UI、照明切り替え、全画面 API とその代替表示、`updatePanel`、時計ボタン(`layoutClockBtn`)、照明の自動化(`autoLightTick`)、メンテの案内、水槽のリセット |
 | `js/perf.js` | 性能計測 | `?perf` を付けて開いたときだけ有効。描画の区間ごとの所要時間を表示(iPhone では 95 匹でも 60fps、draw 約 4ms)。無効時は何もしない。確認用の `?aging=dirt:1,algaeGlass:1,algaeHard:1,clog:1,growth:1`(`aging.js`)は時間経過の状態を指定して開く(保存せず、メンテも止める。無指定時は何もしない。詳細は `docs/SPEC.md` の「11. 時間の経過」) |
@@ -79,7 +79,7 @@ package.json          npm test / drawlog / school / release / serve
 - **import した変数へは代入できない。** 共有の変数(`ctx`・`U`・`W`・`H`・`DPR`・`waterTop`・`Tset`・`Tw`・`timeScale`・`nightOn`・`nightT`、`BASE_A`・`EYE`、時間経過の状態の `agingOn`・`dirt`・`algaeGlass`・`algaeHard`・`clog`・`growth`・`DO`・`lastClean`・`lastFilter`)は、所有するモジュールで `export let` とし、書き換えは所有モジュールが export するセッターや関数(`setCtx`・`setU`・`setBaseA`・`setEye`・`setAgingOn`・`resetAging`・`updateAging`・`checkMaintenance` など)で行う。aging の状態を他のモジュールから直接代入しない。読み取りは import した名前をそのまま使う(ライブバインディングなので、差し替え後の値が見える)。
 - **長さは `U` を単位に書く。** `U = min(W/1000, H/625)`。全画面では縦横比が変わる。
 - **`EYE` はポップアップ専用。** 視線とウインクのために `setEye()` で一時的に設定し、描画後に `null` へ戻す。
-- **描画順には意味がある。** 静的背景 → 光の筋 → 奥の水草 → 霞 → 泡 → 奥の魚 → 薄い霞 → 流木・岩・こけ・中景の草 → 手前の魚 → 前景の草 → 浮草 → 粒子 → コースティクス → 水面 → ガラスの汚れ・苔(`drawAgingGlass`) → 色調補正 → LED → 温度計 → 時計 → ガラス。流木・岩・こけの直後に岩・流木の苔(`drawAgingHard`)も入る。詳細は `docs/ARCHITECTURE.md`。
+- **描画順には意味がある。** 静的背景 → 光の筋 → 奥の水草 → 霞 → 泡 → 奥の魚 → 薄い霞 → 流木・岩・こけ・中景の草 → 手前の魚 → 前景の草 → 浮草 → 粒子 → コースティクス → 水面 → ガラスの汚れ・苔(`drawAgingGlass`) → 色調補正 → LED → 温度計 → 時計 → 酸素メーター → ガラス。流木・岩・こけの直後に岩・流木の苔(`drawAgingHard`)も入る。詳細は `docs/ARCHITECTURE.md`。
 - **`resize()` で情景を作り直す。** 配置はシード固定の乱数なので、同じサイズなら同じ配置になる。魚の位置は比率で引き継ぐ。
 - **新しい行動や仕草を足したら、テストの `ACTS` にも追加する。**(`tests/smoke.mjs` と `tests/drawlog.mjs` の両方)
 - **モジュールのトップレベルの実行順を変えない。** `main.js` が import する順(species → core → aging → fish-render → scene → fish-behavior → popup → ui)で各モジュールが評価され、最後に `main.js` の「開始」が走る。トップレベルで乱数や Canvas を使う処理を足すと、描画ログの基準(`tests/baseline/`)と食い違う。

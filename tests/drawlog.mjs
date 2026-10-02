@@ -119,8 +119,8 @@ function createEnv() {
       get(o, k) {
         if (typeof k === "symbol") return o[k];
         if (k in o) return o[k];
-        if (k === "createLinearGradient" || k === "createRadialGradient") {
-          const kind = k === "createLinearGradient" ? "linear" : "radial";
+        if (k === "createLinearGradient" || k === "createRadialGradient" || k === "createConicGradient") {
+          const kind = k === "createLinearGradient" ? "linear" : k === "createRadialGradient" ? "radial" : "conic";
           return (...a) => mkgrad(kind, a);
         }
         if (k === "createImageData") return (w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) });

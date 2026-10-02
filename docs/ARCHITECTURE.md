@@ -15,7 +15,7 @@
 | `js/aging.js` | 時間経過の状態モデル(汚れ・苔・目詰まり・水草の成長・溶存酸素・メンテ・日の出日没)。`agingOn`、`dirt` `algaeGlass` `algaeHard` `clog` `growth` `DO` `lastClean` `lastFilter` `sinceClean`、`updateAging`、`checkMaintenance`、`onVisibility`、`DOsat` `hypoxia` `DOeq`、`sunTimes` `lightPhase` `autoLightStep`、`noticeMessage`。トップレベルで乱数・Canvas・`Date` を使わない |
 | `js/fish-render.js` | 描画ヘルパ、`BASE_A`、`EYE`、`PAINT`、`drawFish` |
 | `js/fish-behavior.js` | `fishes`、`schools`、`makeFish`、`syncFish`、`updateHealth`、`updateSchools`、`updateFish` |
-| `js/scene.js` | `buildScene`、`makeStatic`、水草・流木・岩・浮草の描画、時間経過の見た目(`buildAging`・`ensureAging`・`drawAgingGlass`・`drawAgingHard`)、コースティクス・光の筋・水面(光の素材は `buildLight` で作り置き)、温度計、24時間計(`clockHourAngle`、`drawClock`、位置を返す `clockGeom`。オフのときはグレー表示)、LED・色調補正・ガラス、エアストーン・泡・粒子 |
+| `js/scene.js` | `buildScene`、`makeStatic`、水草・流木・岩・浮草の描画、時間経過の見た目(`buildAging`・`ensureAging`・`drawAgingGlass`・`drawAgingHard`)、コースティクス・光の筋・水面(光の素材は `buildLight` で作り置き)、温度計、24時間計(`clockHourAngle`、`drawClock`、位置を返す `clockGeom`。オフのときはグレー表示)、酸素メーター(`o2NeedleAngle`、`drawO2Meter`、`meterGeom`、作り置きの `buildMeter`)、LED・色調補正・ガラス、エアストーン・泡・粒子 |
 | `js/popup.js` | 拡大ポップアップ(`P`、`startAct`、`updatePop`、`drawPop`、`openPop` / `closePop`) |
 | `js/ui.js` | パネル、全画面表示、`updatePanel`、時計ボタン(`layoutClockBtn`)・照明の自動化(`autoLightTick`)・メンテの案内(`showNoticeIfAny`)・水槽のリセット |
 | `js/perf.js` | `?perf` のときだけ有効な性能計測(`PERF`、`perfBegin` / `perfMark` / `perfEnd` / `perfFrame` / `perfReport`)。ほかに依存しない |
@@ -29,7 +29,7 @@
 | `core.js` | species |
 | `aging.js` | core、species |
 | `fish-render.js` | core、species |
-| `scene.js` | core、aging(`agingOn`。時計のグレー表示。`dirt`・`algaeGlass`・`algaeHard`・`clog`・`growth`。汚れ・苔・水草の見た目) |
+| `scene.js` | core、aging(`agingOn`。酸素メーターの針は `DO`。時計のグレー表示。`dirt`・`algaeGlass`・`algaeHard`・`clog`・`growth`。汚れ・苔・水草の見た目) |
 | `fish-behavior.js` | core、species、aging(`DO`、`hypoxia`)、scene(`spawnBubble`) |
 | `popup.js` | core、species、fish-render |
 | `ui.js` | core、species、aging、fish-render、fish-behavior、popup、scene(`clockGeom`)、**main(`resize`)** |
@@ -163,7 +163,8 @@ loop(毎フレーム)
 17. LED 照明の器具
 18. 温度計
 19. 24時間計(温度計とガラスの間。端末のローカル時刻)
-20. ガラスの映り込みと周辺減光
+20. 酸素メーター(`drawO2Meter()`。時計の直後、ガラスの前。文字盤は `buildMeter()` が作り置き。毎フレームは `drawImage` と針だけ。`?perf` の区間名は `o2meter`)
+21. ガラスの映り込みと周辺減光
 
 `?perf` の区間名は `agingGlass`(上の 15。`surface` と `grade` の間)。岩・流木の苔は `midground` に含まれる。水草の成長(ロタラ・バリスネリア・浮草)と、ソードの黄ばみ・縁の点は、各水草の描画関数の中で状態を読み取るだけで、描画順は変わらない。
 

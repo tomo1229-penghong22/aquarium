@@ -5,7 +5,7 @@ import { ORDER } from "./species.js";
 import { applyAgingParam, checkMaintenance, fishLoadOf, initAging, onVisibility, updateAging } from "./aging.js";
 import { drawFish } from "./fish-render.js";
 import { fishes, schools, syncFish, updateFish, updateHealth, updateSchools } from "./fish-behavior.js";
-import { bubbles, buildScene, drawBubbles, drawCarpet, drawAgingGlass, drawAgingHard, drawCaustics, drawClock, drawFern, drawFixture, drawFloats, drawGlass, drawLotus, drawMoss, drawMotes, drawRays, drawRibbon, drawRock, drawStem, drawSurface, drawSword, drawThermometer, drawWood, grade, plants, rocks, staticLayer, staticNight, updateBubbles } from "./scene.js";
+import { bubbles, buildMeter, buildScene, drawBubbles, drawCarpet, drawAgingGlass, drawAgingHard, drawCaustics, drawClock, drawFern, drawFixture, drawFloats, drawGlass, drawLotus, drawMoss, drawMotes, drawO2Meter, drawRays, drawRibbon, drawRock, drawStem, drawSurface, drawSword, drawThermometer, drawWood, grade, plants, rocks, staticLayer, staticNight, updateBubbles } from "./scene.js";
 import { autoLightTick, layoutClockBtn, showNoticeIfAny, updatePanel } from "./ui.js";
 import { PERF, perfBegin, perfEnd, perfFrame, perfMark, perfReport } from "./perf.js";
 
@@ -65,6 +65,8 @@ function draw(){
   if (PERF) perfMark("thermometer");
   drawClock();
   if (PERF) perfMark("clock");
+  drawO2Meter();
+  if (PERF) perfMark("o2meter");
   drawGlass();
   if (PERF) { perfMark("glass"); perfEnd("draw"); }
 }
@@ -109,6 +111,7 @@ initAging(Date.now());
 applyAgingParam(typeof location !== "undefined" ? location.search : ""); // ?aging=... のときだけ状態を指定(無指定は何もしない)
 checkMaintenance(Date.now());
 resize();
+document.fonts?.ready?.then(() => buildMeter()); // Web フォント読み込み後に、作り置きの「O₂」を正しい字体で作り直す(fonts がない環境では何もしない)
 syncFish();
 autoLightTick(Date.now());
 updatePanel();

@@ -16,7 +16,7 @@ function mkctx() {
   return new Proxy({}, {
     get(o, k) {
       if (k in o) return o[k];
-      if (k === "createLinearGradient" || k === "createRadialGradient") return () => grad;
+      if (k === "createLinearGradient" || k === "createRadialGradient" || k === "createConicGradient") return () => grad;
       if (k === "createImageData") return (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) });
       return noop;
     },
@@ -176,6 +176,30 @@ for (const sp of A.ORDER) {
   let err = null;
   try { scene.drawClock(); } catch (e) { err = e; }
   check("24時間計の描画関数が例外なく呼べる", !err, err ? String(err) : "");
+}
+
+{
+  // 酸素メーター:針の角度(純粋関数)・描画関数・毎フレームの命令
+  const f = d => scene.o2NeedleAngle(d), near = (x, y) => Math.abs(x - y) < 1e-9;
+  check("酸素メーターの針:DO 0→135 / 5→270 / 10→405 / 7.9→348.3 / 範囲外は丸める(-1→135、12→405)",
+    near(f(0), 135) && near(f(5), 270) && near(f(10), 405) && near(f(7.9), 348.3) && near(f(-1), 135) && near(f(12), 405),
+    `${f(0)} / ${f(5)} / ${f(10)} / ${f(7.9)} / ${f(-1)} / ${f(12)}`);
+  const savedDO = ag.DO;
+  let err = null;
+  for (let d = 0; d <= 10; d += 0.5) { ag.setAgingState({ DO: d }); try { scene.drawO2Meter(); } catch (e) { err = e; } }
+  ag.setAgingState({ DO: 25 }); try { scene.drawO2Meter(); } catch (e) { err = e; }
+  check("酸素メーターの描画関数が DO 0〜10(と 25)で例外なく呼べる", !err, err ? String(err) : "");
+  const g = scene.meterGeom(), c = scene.clockGeom();
+  check("酸素メーターの位置:中心は時計の 66U 右・同じ高さ・同じ半径", Math.abs(g.x - c.x - 66 * core.U) < 1e-9 && g.y === c.y && g.r === c.r, `x ${g.x.toFixed(2)} (時計 ${c.x.toFixed(2)} + 66U ${(66 * core.U).toFixed(2)})`);
+  const KEYS = ["createLinearGradient", "createRadialGradient", "createConicGradient", "createImageData", "putImageData", "drawImage", "fill", "stroke"];
+  const n = Object.fromEntries(KEYS.map(k => [k, 0])), cx = core.ctx;
+  for (const k of KEYS) cx[k] = () => { n[k]++; return { addColorStop() {}, data: new Uint8ClampedArray(4) }; };
+  ag.setAgingState({ DO: 4 }); let e2 = null; try { scene.drawO2Meter(); } catch (e) { e2 = e; }
+  for (const k of KEYS) delete cx[k];
+  ag.setAgingState({ DO: savedDO });
+  check("酸素メーターの毎フレーム:グラデーション生成・画素計算なし(drawImage 1 回+針の線・点だけ)",
+    !e2 && n.createLinearGradient + n.createRadialGradient + n.createConicGradient + n.createImageData + n.putImageData === 0 && n.drawImage === 1,
+    `drawImage ${n.drawImage} / stroke ${n.stroke} / fill ${n.fill} / グラデーション生成 ${n.createLinearGradient + n.createRadialGradient + n.createConicGradient}`);
 }
 
 {
