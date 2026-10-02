@@ -69,6 +69,18 @@ function rangeOf(c){
   const list = c.surf === "rock" ? rockS : c.surf === "wood" ? woodS : null, pl = list && list[Math.min(c.id, list.length - 1)];
   return pl && pl.ok ? [pl.s0, pl.s1] : [0.03, 0.97];
 }
+/* 前面ガラスの苔の多い所(scene.js の苔の分布:下寄り+左右の隅)に合わせた、貝・オトの行き先。
+   苔の濃さ ≒ 0.04 + 0.75·yf³ + 0.45·edge·(0.35+0.65·yf)(yf:水面〜下端の比、edge:左右 12% の隅で 1)。
+   帯の上端は、中央で yf=0.6、隅で yf=0.35(下端側ほど濃い)、下端は砂の少し上(sandY − 8U)。砂の下には出ない */
+const edgeOf = x => Math.max(0, 1 - Math.min(x / W, 1 - x / W) / 0.12);
+export function glassBand(x){
+  const top = waterTop + (H - waterTop) * lerp(0.6, 0.35, edgeOf(x));
+  return [top, Math.max(top + 4 * U, sandY(clamp(x, 0, W)) - 8 * U)];
+}
+function randGlassF(){
+  const fx = Math.random() < 0.4 ? (Math.random() < 0.5 ? rnd(0.05, 0.16) : rnd(0.84, 0.95)) : rnd(0.06, 0.94), [y0, y1] = glassBand(fx * W);
+  return { surf: "gF", id: 0, s: 0, z: 0, fx, fy: rnd(y0, y1) / H };
+}
 const onGlass = c => c.surf === "gF" || c.surf === "gB";
 
 /* 新しい居場所の候補 { surf, id, s, z, fx, fy }。hot:高温・低酸素の度合い(オトは水面近くのガラス、エビは流木の高い所へ寄る) */
@@ -79,6 +91,7 @@ function randSpot(sp, hot, noGlassF = false){
   if (sp === "oto" && hot > 0.3 && Math.random() < hot) kind = Math.random() < 0.7 ? "gB" : "gF";
   if (sp === "shrimp" && hot > 0.3 && Math.random() < hot) kind = "wood";
   const c = { surf: kind, id: 0, s: 0.5, z: Math.random(), fx: 0, fy: 0 };
+  if (kind === "gF" && hot <= 0.3) return randGlassF();
   if (kind === "gF" || kind === "gB") {
     c.fx = rnd(0.06, 0.94);
     const y = hot > 0.3 ? rnd(waterTop + 25 * U, waterTop + 90 * U) : rnd(waterTop + 30 * U, sandY(c.fx * W) - 24 * U);
@@ -97,7 +110,7 @@ function attach(c, spot){
   c.surf = spot.surf; c.id = spot.id; c.s = spot.s; c.z = spot.z; c.fx = spot.fx; c.fy = spot.fy;
   place(c);
   if (onGlass(c)) { // ガラスでの向き
-    c.ang = Math.random() < 0.5 ? rnd(-0.3, 0.3) : (Math.random() < 0.5 ? 1 : -1) * rnd(1.2, 1.7);
+    c.ang = Math.random() < (spot.surf === "gF" ? 0.85 : 0.5) ? rnd(-0.3, 0.3) : (Math.random() < 0.5 ? 1 : -1) * rnd(1.2, 1.7); // 前面ガラスは横向きが多い(苔の帯に沿う)
     c.sx = Math.random() < 0.5 ? 1 : -1;
   } else { c.fx = c.x / W; c.fy = c.y / H; }
 }
@@ -113,7 +126,7 @@ function initCr(f){
 /* ---------------- 更新 ---------------- */
 function startTransfer(c, spot){ c.pend = spot; c.fph = "out"; }
 function stepFade(c, dt){
-  if (c.fph === "out") { c.fade -= dt / CRAWL.fadeSec; if (c.fade <= 0) { c.fade = 0; attach(c, c.pend); c.pend = null; c.fph = "in"; c.hd = rnd(0, TAU); c.hdD = c.hd; c.hdT = 3; c.st = "rest"; c.t = rnd(2, 5); } }
+  if (c.fph === "out") { c.fade -= dt / CRAWL.fadeSec; if (c.fade <= 0) { c.fade = 0; attach(c, c.pend); c.pend = null; c.fph = "in"; c.hd = Math.random() < 0.5 ? 0 : Math.PI; c.hdD = c.hd; c.hdT = 3; c.st = "rest"; c.t = rnd(2, 5); } }
   else { c.fade += dt / CRAWL.fadeSec; if (c.fade >= 1) { c.fade = 1; c.fph = null; } }
 }
 function moveAlong(c, v, dt){
@@ -129,17 +142,18 @@ function updSnail(f, c, S, act, dt){
   if (c.fph) { stepFade(c, dt); if (!c.fph) c.t = c.surf === "gF" ? pickR(CRAWL.snailGlassStay) : pickR(CRAWL.snailRest); place(c); return; }
   c.t -= dt;
   if (onG) {
-    c.hdT -= dt; if (c.hdT <= 0) { c.hd += (Math.random() - 0.5) * 1.6; c.hdT = rnd(4, 12); }
+    // ガラスでは横向き(左右)が多め:向きを左右どちらかの基準に保ち、少しだけふらつく(苔の帯に沿って跡が付く)
+    c.hdT -= dt; if (c.hdT <= 0) { const base = Math.cos(c.hd) >= 0 ? 0 : Math.PI; c.hd = base + (Math.random() - 0.5) * 0.9; c.hdT = rnd(4, 12); }
     const v = S.speed * U * act * 1.2;
     let nx = c.fx * W + Math.cos(c.hd) * v * dt, ny = c.fy * H + Math.sin(c.hd) * v * dt;
-    const x0 = W * 0.05, x1 = W * 0.95, y0 = waterTop + 26 * U, y1 = sandY(clamp(nx, 0, W)) - 24 * U;
-    if (nx < x0 || nx > x1 || ny < y0 || ny > y1) { c.hd = Math.atan2((y0 + y1) / 2 - ny, W / 2 - nx) + (Math.random() - 0.5) * 0.8; nx = clamp(nx, x0, x1); ny = clamp(ny, y0, y1); }
+    const x0 = W * 0.05, x1 = W * 0.95, [y0, y1] = glassBand(nx);
+    if (nx < x0 || nx > x1 || ny < y0 || ny > y1) { c.hd = (nx < x0 ? 0 : nx > x1 ? Math.PI : (Math.cos(c.hd) >= 0 ? 0 : Math.PI)) + (Math.random() - 0.5) * 0.4; nx = clamp(nx, x0, x1); ny = clamp(ny, y0, y1); }
     c.fx = nx / W; c.fy = ny / H;
     c.hdD += wrapA(c.hd - c.hdD) * Math.min(1, dt * 1.5);
     if (c.t <= 0) startTransfer(c, randSpot("snail", 0, true));
   } else if (c.st === "rest") {
     if (c.t <= 0) {
-      if (Math.random() < CRAWL.snailGlassP) startTransfer(c, { surf: "gF", id: 0, s: 0, z: 0, fx: rnd(0.08, 0.92), fy: rnd(0.2, 0.7) });
+      if (Math.random() < CRAWL.snailGlassP) startTransfer(c, randGlassF());
       else { c.st = "move"; c.t = pickR(CRAWL.snailMove); c.dir = Math.random() < 0.5 ? 1 : -1; }
     }
   } else {
