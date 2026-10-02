@@ -6,6 +6,10 @@ import { DO, agingOn, algaeGlass, algaeHard, clog, dirt, growth } from "./aging.
 export let staticNight = null, staticLayer = null, plants = { back: [], mid: [], front: [] }, rocks = [];
 let rays = [], motes = [];
 export const bubbles = [];
+export const FX = { puff: true }; // コリドラスの砂煙(false で無効。描画ログの照合用・テスト用)
+const puffs = [];
+export const puffCount = () => puffs.length;
+export const getWood = () => wood; // 流木の枝(各枝は [x, y, 太さ] の点列)。お掃除生体の「這える面」の読み取り用
 let wood = [], moss = [], floats = [], glints = [], orbs = [];
 
 /* ---------------- 配置 ---------------- */
@@ -987,6 +991,28 @@ export function updateBubbles(dt, t){
     b.r *= 1 + dt * 0.04;
     if (b.y < waterTop + 2 * U) bubbles.splice(i, 1);
   }
+}
+/* 砂煙:コリドラスが砂をつつくと舞う、やわらかい粒(数粒が上へ舞って消える) */
+export function spawnPuff(x, y){
+  if (!FX.puff || puffs.length >= 60) return;
+  puffs.push({ x, y, vx: (Math.random() - 0.5) * 14 * U, vy: -(8 + Math.random() * 10) * U, r: (1.2 + Math.random() * 1.4) * U, age: 0, life: 1.1 + Math.random() * 0.9 });
+}
+export function updatePuffs(dt, t){
+  for (let i = puffs.length - 1; i >= 0; i--) {
+    const p = puffs[i]; p.age += dt;
+    if (p.age >= p.life) { puffs.splice(i, 1); continue; }
+    p.vy *= Math.exp(-dt * 1.2); p.x += (p.vx + current(p.x, t) * 5 * U) * dt; p.y += p.vy * dt; p.vx *= Math.exp(-dt * 1.5);
+  }
+}
+export function drawPuffs(){
+  if (!puffs.length) return;
+  ctx.save();
+  puffs.forEach(p => {
+    const k = p.age / p.life;
+    ctx.fillStyle = `rgba(222,205,160,${0.5 * (1 - k) * Math.min(1, p.age * 6)})`;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (1 + k * 0.8), 0, TAU); ctx.fill();
+  });
+  ctx.restore();
 }
 export function drawBubbles(){
   const a = airstone();

@@ -234,13 +234,109 @@ export const PAINT = {
     pectoral(L, H, f, finC);
     eye(L * 0.3, -H * 0.1, H * 0.13, "#8a8f86");
   },
-  /* 仮の描画(N1。N2 で本描画に置き換える):体長 L の楕円 1 つだけ */
-  oto(L, wag, f){ placeholder(L, 0.2, "#8c8a6a"); },
-  shrimp(L, wag, f){ placeholder(L, 0.16, "#b9c3b4"); },
-  snail(L, wag, f){ placeholder(L, 0.5, "#7a6a4a"); },
+  /* お掃除生体(横向き。原点は体の中心、頭は +x)。足元までの距離は GROUND(体長 L の倍率) */
+  oto(L, wag, f){
+    const H = L * 0.2, finC = "rgba(205,196,175,0.5)";
+    withTail(-L * 0.48, wag, () => { ctx.fillStyle = finC; ctx.fill(forkTail(L * 0.24, H * 1.1, 0.2)); finRays(L * 0.22, H, 4, "rgba(80,66,48,0.22)"); });
+    ctx.fillStyle = finC;
+    ctx.fill(fin([L * 0.02, -H * 0.45], [-L * 0.02, -H * 0.95], [-L * 0.12, -H * 0.85], [-L * 0.14, -H * 0.42]));
+    const body = bodyPath(L, H);
+    ctx.fillStyle = "#ddd5c1"; ctx.fill(body);
+    ctx.save(); ctx.clip(body);
+    ctx.fillStyle = "#6a563a"; ctx.fillRect(-L * 0.6, -H, L * 1.2, H * 0.86);           // 背:暗い褐色
+    ctx.fillStyle = "#25211e";                                                          // 体側の黒い太い線
+    ctx.beginPath(); ctx.moveTo(L * 0.5, -H * 0.22); ctx.lineTo(-L * 0.5, -H * 0.2); ctx.lineTo(-L * 0.5, H * 0.13); ctx.lineTo(L * 0.5, H * 0.07); ctx.fill();
+    ctx.restore();
+    shade(body, L, H, f);
+    ctx.fillStyle = "rgba(238,229,205,0.95)"; ctx.beginPath(); ctx.ellipse(L * 0.45, H * 0.17, L * 0.05, H * 0.11, 0.35, 0, TAU); ctx.fill(); // 腹側の吸盤状の口
+    pectoral(L, H, f, finC);
+    eye(L * 0.33, -H * 0.2, H * 0.14, "#9a8a60");
+  },
+  shrimp(L, wag, f){
+    const hh = L * 0.13, t = f.phase, pick = f.pick || 0, ct = f.clawT ?? t;
+    ctx.lineCap = "round"; ctx.lineWidth = Math.max(0.7, 0.9 * U); ctx.strokeStyle = "rgba(170,186,170,0.7)";
+    for (let i = 0; i < 5; i++) { // 歩脚
+      const x = L * (0.2 - i * 0.085), sw = Math.sin(t * 3 + i * 1.3) * L * 0.045;
+      ctx.beginPath(); ctx.moveTo(x, hh * 0.45); ctx.lineTo(x + sw, L * 0.17); ctx.stroke();
+    }
+    ctx.strokeStyle = "rgba(205,220,205,0.8)"; ctx.lineWidth = Math.max(0.5, 0.6 * U); // 触角
+    for (const d of [-1, 1]) { ctx.beginPath(); ctx.moveTo(L * 0.45, -L * 0.05); ctx.quadraticCurveTo(L * 0.7, -L * (0.12 + 0.05 * d), L * 0.95, -L * (0.1 + 0.12 * d) + Math.sin(t * 0.8 + d) * L * 0.03); ctx.stroke(); }
+    ctx.fillStyle = "rgba(190,206,190,0.78)";
+    for (let i = 0; i < 6; i++) { // 腹部の節(後ろへ向かって少し下がる)
+      const x = L * (0.09 - i * 0.085), y = -L * 0.015 - Math.sin(i / 5 * Math.PI) * L * 0.03 + Math.max(0, i - 3) * L * 0.03, r = 1 - i * 0.07;
+      ctx.beginPath(); ctx.ellipse(x, y, L * 0.075, hh * 0.78 * r, 0, 0, TAU); ctx.fill();
+    }
+    ctx.save(); ctx.translate(-L * 0.5, L * 0.04); ctx.rotate(wag * 0.8);                // 尾扇
+    ctx.fillStyle = "rgba(205,218,205,0.6)";
+    for (const a of [-0.5, 0, 0.5]) { ctx.beginPath(); ctx.ellipse(-L * 0.04 * Math.cos(a), L * 0.04 * Math.sin(a), L * 0.07, hh * 0.35, a, 0, TAU); ctx.fill(); }
+    ctx.restore();
+    ctx.fillStyle = "rgba(196,212,196,0.85)"; ctx.beginPath(); ctx.ellipse(L * 0.26, -L * 0.01, L * 0.2, hh * 0.95, 0.05, 0, TAU); ctx.fill(); // 頭胸部
+    ctx.beginPath(); ctx.moveTo(L * 0.44, -L * 0.04); ctx.lineTo(L * 0.52, -L * 0.07); ctx.lineTo(L * 0.44, L * 0.0); ctx.fill();   // 額角
+    ctx.fillStyle = "rgba(255,255,245,0.3)"; ctx.beginPath(); ctx.ellipse(L * 0.24, -L * 0.06, L * 0.14, hh * 0.18, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = "rgba(160,84,58,0.85)";                                              // 体側の赤褐色の点列
+    for (let i = 0; i < 9; i++) { ctx.beginPath(); ctx.ellipse(L * (0.34 - i * 0.075), L * (0.015 + (i > 4 ? (i - 4) * 0.012 : 0)), L * 0.017, L * 0.012, 0, 0, TAU); ctx.fill(); }
+    ctx.fillStyle = "#1a1d1b"; ctx.beginPath(); ctx.arc(L * 0.4, -L * 0.07, L * 0.02, 0, TAU); ctx.fill(); // 目
+    ctx.strokeStyle = "rgba(180,196,180,0.85)"; ctx.fillStyle = "rgba(190,206,190,0.9)"; ctx.lineWidth = Math.max(0.7, 0.9 * U); // 前脚(はさみ)
+    for (const d of [0, 1]) {
+      const a = 0.35 + Math.sin(ct * 13 + d * 2.4) * 0.55 * pick + (1 - pick) * 0.1, bx = L * 0.4, by = L * 0.07;
+      const mx = bx + Math.cos(a) * L * 0.1, my = by + Math.sin(a) * L * 0.1, ex = mx + Math.cos(a * 0.4) * L * 0.09, ey = my + Math.sin(a) * L * 0.06;
+      ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(mx, my); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.beginPath(); ctx.arc(ex, ey, L * 0.022, 0, TAU); ctx.fill();
+    }
+  },
+  snail(L, wag, f){
+    const R = L * 0.36, cx = -L * 0.1, cy = -L * 0.12;
+    ctx.fillStyle = "#cdbd9c"; ctx.beginPath(); ctx.ellipse(L * 0.06, L * 0.2, L * 0.5, L * 0.09, 0, 0, TAU); ctx.fill();   // 足
+    ctx.fillStyle = "#bba98a"; ctx.beginPath(); ctx.ellipse(L * 0.46, L * 0.15, L * 0.12, L * 0.09, 0, 0, TAU); ctx.fill();  // 頭
+    ctx.strokeStyle = "#8f8266"; ctx.lineWidth = Math.max(0.7, 0.9 * U); ctx.lineCap = "round";
+    const sway = Math.sin(f.phase * 0.7) * L * 0.02;
+    ctx.beginPath(); ctx.moveTo(L * 0.52, L * 0.1); ctx.lineTo(L * 0.62, L * 0.02 + sway); ctx.moveTo(L * 0.5, L * 0.09); ctx.lineTo(L * 0.57, L * 0.0 - sway); ctx.stroke();
+    ctx.fillStyle = "#3d3a22"; ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.fill();                                      // 殻
+    ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.clip();
+    ctx.strokeStyle = "rgba(168,152,84,0.55)"; ctx.lineWidth = Math.max(0.8, 1.1 * U);
+    for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.arc(cx + R * 0.1 * k, cy, R * (0.88 - 0.26 * k), Math.PI * 0.9, Math.PI * 2.25); ctx.stroke(); }
+    ctx.strokeStyle = "rgba(16,16,8,0.45)";
+    for (let k = 0; k < 5; k++) { const a = Math.PI * (0.1 + k * 0.28); ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * R * 0.3, cy + Math.sin(a) * R * 0.3); ctx.lineTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R); ctx.stroke(); }
+    const g = ctx.createLinearGradient(0, cy - R, 0, cy + R);
+    g.addColorStop(0, "rgba(255,248,215,0.2)"); g.addColorStop(0.5, "rgba(255,255,255,0)"); g.addColorStop(1, "rgba(0,28,36,0.34)");
+    ctx.fillStyle = g; ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+    ctx.fillStyle = "rgba(255,250,225,0.22)"; ctx.beginPath(); ctx.ellipse(cx - R * 0.3, cy - R * 0.45, R * 0.32, R * 0.13, -0.6, 0, TAU); ctx.fill();
+    if (f.pale > 0.02) { ctx.fillStyle = `rgba(200,202,194,${f.pale * 0.5})`; ctx.fillRect(cx - R, cy - R, R * 2, R * 2); }
+    ctx.restore();
+    ctx.strokeStyle = "rgba(255,250,228,0.3)"; ctx.lineWidth = Math.max(0.8, 1.0 * U); ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.stroke();
+  },
 };
-function placeholder(L, hr, col){
-  ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(0, 0, L * 0.5, L * hr, 0, 0, TAU); ctx.fill();
+/* 足元(体の中心から接地面まで)の距離。体長 L の倍率 */
+export const GROUND = { oto: 0.1, shrimp: 0.17, snail: 0.29 };
+/* 前面ガラスの石巻貝を、ガラスの外から見た姿(足の裏と口)。原点は足の中心、頭は +x */
+export function paintSnailFront(L, f){
+  const rx = L * 0.56, ry = L * 0.36, ph = f.phase;
+  ctx.fillStyle = "rgba(228,214,186,0.78)"; ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, TAU); ctx.fill();          // 足の裏
+  ctx.fillStyle = "rgba(72,64,40,0.26)"; ctx.beginPath(); ctx.ellipse(-rx * 0.22, 0, rx * 0.62, ry * 0.86, 0, 0, TAU); ctx.fill(); // 透けて見える殻の影
+  ctx.strokeStyle = "rgba(150,135,105,0.45)"; ctx.lineWidth = Math.max(0.6, 0.8 * U);                                       // ゆっくり波打つ筋
+  for (let i = 0; i < 6; i++) {
+    const x = -rx * 0.8 + (((i + ph * 0.45) % 6 + 6) % 6) / 6 * rx * 1.25, h = ry * 0.78 * Math.sqrt(Math.max(0, 1 - (x / rx) * (x / rx)));
+    ctx.beginPath(); ctx.moveTo(x, -h); ctx.quadraticCurveTo(x + ry * 0.2, 0, x, h); ctx.stroke();
+  }
+  ctx.fillStyle = "rgba(216,200,170,0.88)"; ctx.beginPath(); ctx.ellipse(rx * 0.8, 0, rx * 0.28, ry * 0.55, 0, 0, TAU); ctx.fill(); // 頭
+  const wob = Math.sin(ph * 1.7) * ry * 0.22;                                                                               // 左右に動く口
+  ctx.fillStyle = "rgba(150,96,84,0.92)"; ctx.beginPath(); ctx.ellipse(rx * 0.92, wob, rx * 0.1, ry * 0.2, 0, 0, TAU); ctx.fill();
+  ctx.strokeStyle = "rgba(120,78,70,0.7)"; ctx.beginPath(); ctx.moveTo(rx * 0.86, wob); ctx.lineTo(rx * 0.98, wob); ctx.stroke();
+  ctx.strokeStyle = "rgba(170,152,122,0.8)"; ctx.lineWidth = Math.max(0.6, 0.9 * U); ctx.lineCap = "round";
+  for (const d of [-1, 1]) { ctx.beginPath(); ctx.moveTo(rx * 0.95, d * ry * 0.3); ctx.lineTo(rx * 1.22, d * ry * 0.5 + Math.sin(ph + d) * ry * 0.06); ctx.stroke(); }
+  ctx.strokeStyle = "rgba(255,250,235,0.35)"; ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, TAU); ctx.stroke();
+}
+/* お掃除生体を (x, y)・角度 rot・向き sx(±1)で描く。a:全体の透明度の倍率 */
+export function drawCreature(f, L, wag, x, y, rot, sx, a = 1){
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(sx, 1);
+  BASE_A = SPECIES[f.sp].alpha * a; ctx.globalAlpha = BASE_A;
+  PAINT[f.sp](L, wag, f);
+  ctx.restore(); BASE_A = 1;
+}
+export function drawSnailFront(f, L, x, y, rot, a = 1){
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.globalAlpha = SPECIES.snail.alpha * a;
+  paintSnailFront(L, f);
+  ctx.restore();
 }
 
 export function drawFish(f){

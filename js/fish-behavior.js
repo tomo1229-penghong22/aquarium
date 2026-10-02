@@ -1,7 +1,7 @@
 // 魚の生成・体調・行動(群れ・分離・壁・水温による層の移動)。
 import { TAU, Tw, U, W, bottomY, clamp, counts, lerp, timeScale, waterTop } from "./core.js";
 import { ORDER, SPECIES } from "./species.js";
-import { spawnBubble } from "./scene.js";
+import { FX, spawnBubble, spawnPuff } from "./scene.js";
 import { DO, hypoxia } from "./aging.js";
 
 /* 群れる種(school > 0.5)の形の調整。前後方向に一列に並ばないようにする */
@@ -69,7 +69,7 @@ export function syncFish(){
 }
 
 /* ---------------- 体調・行動 ---------------- */
-function activity(T){ return T < 26 ? clamp(0.35 + (T - 18) / 8 * 0.65, 0.35, 1) : 1 + Math.min(0.45, (T - 26) * 0.07); }
+export function activity(T){ return T < 26 ? clamp(0.35 + (T - 18) / 8 * 0.65, 0.35, 1) : 1 + Math.min(0.45, (T - 26) * 0.07); }
 
 export function updateHealth(f, dt){
   const [lo, hi] = SPECIES[f.sp].opt;
@@ -149,6 +149,11 @@ export function updateFish(f, dt){
       tx = f.state === "rest" ? f.x : f.tx; ty = floorY;
       speed *= f.state === "rest" ? 0.05 : 0.55;
     }
+    // 砂つつき:forage 中ときどき口先を砂に突っ込み(約 0.9 秒)、砂煙の粒を数粒上げる(FX.puff が false なら何もしない)
+    if (FX.puff && f.state === "forage") {
+      if (f.dig > 0) { f.dig -= dt; speed *= 0.25; if (Math.random() < dt * 14) spawnPuff(f.x + f.flip * L * 0.5, f.y + L * 0.22); }
+      else if (f.health > 0.3 && Math.random() < dt * 0.35) f.dig = 0.9;
+    }
     { const [lo, hi] = xRange(L); tx = clamp(tx, lo, hi); }
   } else {
     f.tTimer -= dt;
@@ -215,7 +220,7 @@ export function updateFish(f, dt){
   const pt = clamp(Math.atan2(f.vy, Math.abs(f.vx) + 6 * U), -0.45, 0.45);
   f.pitch += (pt - f.pitch) * Math.min(1, dt * 4);
   let tilt = 0;
-  if (f.sp === "cory" && f.state === "forage") tilt = 0.14;
+  if (f.sp === "cory" && f.state === "forage") tilt = f.dig > 0 ? 0.5 : 0.14;
   tilt += Math.pow(1 - f.health, 2) * (hot > 0 ? -0.35 : 0.45);
   f.tilt += (tilt - f.tilt) * Math.min(1, dt * 2);
   const sp = Math.hypot(f.vx, f.vy);

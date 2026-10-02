@@ -185,6 +185,65 @@ for (const sp of A.ORDER) {
 }
 
 {
+  // お掃除生体の動きと描画(N2)
+  const cr = await imp("crawlers.js");
+  const NEW = ["oto", "shrimp", "snail"], save0 = Object.fromEntries(A.ORDER.map(k => [k, A.counts[k]]));
+  const bounds = () => {
+    let bad = null, n = 0;
+    for (const f of A.fishes) {
+      if (!A.SPECIES[f.sp].solo) continue;
+      const p = cr.crawlerPos(f); if (!p) continue; n++;
+      const ok = Number.isFinite(p.x) && Number.isFinite(p.y) && p.x >= 0 && p.x <= core.W && p.y >= core.waterTop && p.y <= (core.sandY(p.x) + 30 * core.U + 1);
+      if (!ok && !bad) bad = `${f.sp} ${p.surf} (${p.x.toFixed(1)}, ${p.y.toFixed(1)}) 水面 ${core.waterTop.toFixed(1)} 砂 ${core.sandY(p.x).toFixed(1)}`;
+    }
+    return { bad, n };
+  };
+  for (const k of NEW) A.counts[k] = A.SPECIES[k].max;
+  A.syncFish();
+  const kinds = new Set(); let badAll = null, nSeen = 0;
+  for (let i = 0; i < 60 * 120; i++) { // 2 分(60fps)
+    frames(1);
+    if (i % 20 === 0) { const b = bounds(); nSeen = Math.max(nSeen, b.n); if (b.bad && !badAll) badAll = b.bad; A.fishes.forEach(f => { if (A.SPECIES[f.sp].solo && f.cr) kinds.add(f.sp + ":" + cr.crawlerPos(f).surf); }); }
+  }
+  check("お掃除生体(全種最大数)の位置が 2 分間つねに水槽の中(水面より下・砂の下端より上・横は水槽内)", !badAll && nSeen === 40 && finite(), badAll || `${nSeen} 匹 / 面 ${[...kinds].sort().join(" ")}`);
+  // 水温・照明・全画面サイズ・低酸素で、更新と描画(全レイヤ)が例外なく呼べる
+  let err = null;
+  const drawAll = () => ["back", "low", "front", "glass"].forEach(l => cr.drawCrawlers(l));
+  try {
+    const conds = [[25, false, false, 8], [18, false, false, 8], [34, true, false, 8], [25, false, true, 8], [25, true, false, 0.5], [34, false, true, 1]];
+    for (const [T, night, fs, doV] of conds) {
+      A.setT(T); A.setNight(night); A.setPseudo(fs); ag.setAgingState({ DO: doV });
+      for (let i = 0; i < 400; i++) { frames(1); if (i % 40 === 0) { drawAll(); cr.grazers(); } }
+      if (!finite() || bounds().bad) throw new Error(`T=${T} night=${night} fs=${fs} DO=${doV}: ${bounds().bad || "NaN"}`);
+    }
+    A.setPseudo(false); A.setNight(false); A.setT(25);
+    for (const f of A.fishes) if (A.SPECIES[f.sp].solo) f.health = 1;
+  } catch (e) { err = e; }
+  check("お掃除生体:水温 18/34℃・昼夜・全画面サイズ・低酸素(DO 0.5/1)で更新と描画が例外なし・位置が範囲内", !err, err ? String(err.stack || err) : "");
+  // 低酸素・高温でオトは水面近くのガラスへ寄る(寄っていることの確認:平均の高さが通常より上)
+  const meanY = sp => { const l = A.fishes.filter(f => f.sp === sp && f.cr).map(f => cr.crawlerPos(f).y); return l.reduce((a, b) => a + b, 0) / l.length; };
+  const grazersOk = Array.isArray(cr.grazers()) && cr.grazers().every(g => ["glassF", "hard"].includes(g.kind) && Number.isFinite(g.x) && Number.isFinite(g.y));
+  check("お掃除生体:grazers() が前面ガラス(glassF)・岩流木(hard)の位置を返す", grazersOk, `${cr.grazers().length} 件`);
+  // 低酸素:DO 固定でしばらく回す。オト・エビは水面側へ寄る(平均 y が通常時より小さい)
+  const settle = (doV, n) => { for (let i = 0; i < n; i++) { ag.setAgingState({ DO: doV }); frames(1); } };
+  settle(8, 60 * 20); const yOtoN = meanY("oto"), ySrN = meanY("shrimp"), ySnN = meanY("snail");
+  settle(0.5, 60 * 45); const yOtoL = meanY("oto"), ySrL = meanY("shrimp"), ySnL = meanY("snail");
+  check("低酸素でオト・エビは水面側へ寄る(平均の高さが上がる)・貝は底のまま", yOtoL < yOtoN && ySrL < ySrN && ySnL > ySnN - 80 * core.U,
+    `オト ${yOtoN.toFixed(0)}→${yOtoL.toFixed(0)} / エビ ${ySrN.toFixed(0)}→${ySrL.toFixed(0)} / 貝 ${ySnN.toFixed(0)}→${ySnL.toFixed(0)}`);
+  ag.setAgingState({ DO: 8 });
+  // 砂煙:フラグ on で粒が出て、off では出ない(描画命令なし)
+  const puffRun = on => {
+    scene.FX.puff = false; frames(60 * 3); scene.FX.puff = on; A.counts.cory = 12; A.syncFish(); // 先に既存の粒を消す
+    let mx = 0; for (let i = 0; i < 60 * 20; i++) { frames(1); mx = Math.max(mx, scene.puffCount()); }
+    scene.FX.puff = true; return mx;
+  };
+  const pOff = puffRun(false), pOn = puffRun(true);
+  check("砂煙:フラグ off では粒が出ず、on ではコリドラスが砂煙の粒を上げる", pOff === 0 && pOn > 0 && scene.FX.puff === true, `off 最大 ${pOff} 粒 / on 最大 ${pOn} 粒`);
+  for (const k of A.ORDER) A.counts[k] = save0[k];
+  A.syncFish(); frames(30);
+}
+
+{
   // sw.js の事前キャッシュのリストに、js/ の全 .js・icons/ の全 PNG・manifest が含まれていること
   const sw = readFileSync(join(root, "sw.js"), "utf8");
   const list = ((sw.match(/PRECACHE\s*=\s*\[([\s\S]*?)\]/) || [])[1] || "").match(/"[^"]+"/g)?.map(s => s.slice(1, -1).replace(/^\.\//, "")) ?? [];

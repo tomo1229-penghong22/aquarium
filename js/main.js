@@ -1,11 +1,12 @@
 // 描画順(draw)・毎フレームの更新(loop)・リサイズ・開始処理。
 // このファイルがエントリポイント。全モジュールの評価が終わってから、末尾の「開始」が実行される。
 import { DPR, counts, H, save, Tset, Tw, W, clamp, ctx, cv, nightOn, nightT, setDPR, setH, setNightT, setTw, setU, setW, setWaterTop, tankEl, timeScale, waterTop } from "./core.js";
-import { ORDER } from "./species.js";
+import { ORDER, SPECIES } from "./species.js";
 import { applyAgingParam, checkMaintenance, fishLoadOf, initAging, onVisibility, updateAging } from "./aging.js";
 import { drawFish } from "./fish-render.js";
+import { drawCrawlers, relayout, updateCrawler } from "./crawlers.js";
 import { fishes, schools, syncFish, updateFish, updateHealth, updateSchools } from "./fish-behavior.js";
-import { bubbles, buildMeter, buildScene, drawBubbles, drawCarpet, drawAgingGlass, drawAgingHard, drawCaustics, drawClock, drawFern, drawFixture, drawFloats, drawGlass, drawLotus, drawMoss, drawMotes, drawO2Meter, drawRays, drawRibbon, drawRock, drawStem, drawSurface, drawSword, drawThermometer, drawWood, grade, plants, rocks, staticLayer, staticNight, updateBubbles } from "./scene.js";
+import { bubbles, buildMeter, buildScene, drawBubbles, drawCarpet, drawAgingGlass, drawAgingHard, drawCaustics, drawClock, drawFern, drawFixture, drawFloats, drawGlass, drawLotus, drawMoss, drawMotes, drawO2Meter, drawPuffs, drawRays, drawRibbon, drawRock, drawStem, drawSurface, drawSword, drawThermometer, drawWood, grade, plants, rocks, staticLayer, staticNight, updateBubbles, updatePuffs } from "./scene.js";
 import { autoLightTick, layoutClockBtn, showNoticeIfAny, updatePanel } from "./ui.js";
 import { PERF, perfBegin, perfEnd, perfFrame, perfMark, perfReport } from "./perf.js";
 
@@ -27,19 +28,23 @@ function draw(){
   if (PERF) perfMark("haze");
   drawBubbles();
   if (PERF) perfMark("bubbles");
-  const sorted = fishes.slice().sort((a, b) => a.z - b.z);
+  const sorted = fishes.filter(f => !SPECIES[f.sp].solo).sort((a, b) => a.z - b.z);
   sorted.forEach(f => { if (f.z < 0.45) drawFish(f); });
+  drawCrawlers("back"); // 奥のガラスに吸いついたオト
   if (PERF) perfMark("backFish");
   ctx.fillStyle = "rgba(110,180,175,0.045)"; ctx.fillRect(0, waterTop, W, H * 0.82 - waterTop);
   ctx.globalAlpha = 0.94; drawWood();
   ctx.globalAlpha = 0.9; rocks.forEach(drawRock);
   drawMoss();
   drawAgingHard();
+  drawCrawlers("low"); // 岩・砂・流木の上の貝・エビ・オト
   ctx.globalAlpha = 0.84;
   plants.mid.forEach(p => p.type === "fern" ? drawFern(p, T) : p.type === "lotus" ? drawLotus(p, T) : drawSword(p, T));
   if (PERF) perfMark("midground");
   ctx.globalAlpha = 1;
   sorted.forEach(f => { if (f.z >= 0.45) drawFish(f); });
+  drawCrawlers("front"); // 移動中のオト
+  drawPuffs();           // コリドラスの砂煙
   if (PERF) perfMark("frontFish");
   ctx.globalAlpha = 0.86;
   plants.front.forEach(p => { if (p.type === "tuft") p.blades.forEach(b => drawRibbon(b, T)); else drawCarpet(p, T); });
@@ -56,6 +61,7 @@ function draw(){
   drawSurface(T);
   if (PERF) perfMark("surface");
   drawAgingGlass(); // ガラスの汚れ・苔(色調補正の前:照明の色調がかかる)
+  drawCrawlers("glass"); // 前面ガラスの貝・オト(汚れ・苔の上、色調補正の前)
   if (PERF) perfMark("agingGlass");
   grade();
   if (PERF) perfMark("grade");
@@ -80,8 +86,8 @@ function loop(now){
   setNightT(clamp(nightT + (nightOn ? dt : -dt) / 1.4, 0, 1));
   if (PERF) perfBegin();
   updateSchools(dt);
-  fishes.forEach(f => { updateHealth(f, dt); updateFish(f, dt); });
-  updateBubbles(dt, T);
+  fishes.forEach(f => { updateHealth(f, dt); if (SPECIES[f.sp].solo) updateCrawler(f, dt); else updateFish(f, dt); });
+  updateBubbles(dt, T); updatePuffs(dt, T);
   let load = 0; for (const f of fishes) load += fishLoadOf(f.sp, f.scale);
   updateAging(realDt, { load, T: Tw, counts });
   if (PERF) perfEnd("logic");
@@ -103,6 +109,7 @@ export function resize(){
   bubbles.length = 0;
   ORDER.forEach(k => schools[k].timer = 0);
   buildScene();
+  relayout();
   layoutClockBtn();
 }
 

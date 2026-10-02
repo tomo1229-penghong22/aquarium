@@ -172,10 +172,9 @@ const child = (mode, env = {}) => {
   check("掃除効果:既定の数で algaeGlass が 1 に達する時間 ≥24h(1.5 倍以上)", d.tg >= 24, `${d.tg.toFixed(2)}h(${(d.tg / z.tg).toFixed(2)} 倍)`);
   check("掃除効果:既定の数で algaeHard が 1 に達する時間 ≥67.2h(1.4 倍以上)", d.th >= 67.2, `${d.th.toFixed(2)}h(${(d.th / z.th).toFixed(2)} 倍)`);
   check("掃除効果:全種最大数でも 4 倍以下(ゼロにならない)かつ既定より遅い", m.tg <= 4 * z.tg && m.th <= 4 * z.th && m.tg > d.tg && m.th > d.th, `glass ${m.tg.toFixed(2)}h(${(m.tg / z.tg).toFixed(2)} 倍)/ hard ${m.th.toFixed(2)}h(${(m.th / z.th).toFixed(2)} 倍)`);
-  check("掃除効果:dirt と clog は変わらない(生体 0 と既定で同時刻の値が同じ)", d.dirt === z.dirt || (reach(def), true) && (() => {
-    const at = c => { ag.restoreAging(null, 0); ag.setAgingOn(true); for (let i = 0; i < 2 * H / 30; i++) ag.updateAging(30, { load: 0, T: 25, counts: c }); return [ag.dirt, ag.clog]; };
-    const a = at(zero), b = at(max); return a[0] === b[0] && a[1] === b[1];
-  })());
+  const at2h = c => { ag.restoreAging(null, 0); ag.setAgingOn(true); for (let i = 0; i < 2 * H / 30; i++) ag.updateAging(30, { load: 0, T: 25, counts: c }); return [ag.dirt, ag.clog]; };
+  const a2 = at2h(zero), b2 = at2h(max);
+  check("掃除効果:dirt と clog は変わらない(生体 0 と最大数で 2 時間後の値が同じ)", a2[0] === b2[0] && a2[1] === b2[1], `dirt ${a2[0].toFixed(4)} / clog ${a2[1].toFixed(4)}`);
   // 減り方は数に対して飽和する(エビ 5→10 と 15→20 で、追加ぶんの効きが後者のほうが小さい)
   const mh = n => ag.hardMult({ shrimp: n });
   check("掃除効果:飽和する(エビを足したときの効き目は数が多いほど小さい。倍率は単調に減る)", mh(0) === 1 && mh(5) > mh(10) && mh(10) > mh(15) && mh(15) > mh(20) && (mh(5) - mh(10)) > (mh(15) - mh(20)) && mh(1000) > 0.25, `0:${mh(0)} 5:${mh(5).toFixed(3)} 10:${mh(10).toFixed(3)} 15:${mh(15).toFixed(3)} 20:${mh(20).toFixed(3)}`);
