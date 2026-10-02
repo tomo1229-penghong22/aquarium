@@ -6,11 +6,11 @@ import { checkMaintenance, fishLoadOf, initAging, onVisibility, updateAging } fr
 import { drawFish } from "./fish-render.js";
 import { fishes, schools, syncFish, updateFish, updateHealth, updateSchools } from "./fish-behavior.js";
 import { bubbles, buildScene, drawBubbles, drawCarpet, drawCaustics, drawClock, drawFern, drawFixture, drawFloats, drawGlass, drawLotus, drawMoss, drawMotes, drawRays, drawRibbon, drawRock, drawStem, drawSurface, drawSword, drawThermometer, drawWood, grade, plants, rocks, staticLayer, staticNight, updateBubbles } from "./scene.js";
-import { updatePanel } from "./ui.js";
+import { autoLightTick, layoutClockBtn, showNoticeIfAny, updatePanel } from "./ui.js";
 import { PERF, perfBegin, perfEnd, perfFrame, perfMark, perfReport } from "./perf.js";
 
 /* ---------------- メインループ ---------------- */
-let last = performance.now(), T = 0, frameNo = 0;
+let last = performance.now(), T = 0, frameNo = 0, lightAcc = 0;
 function draw(){
   if (PERF) perfBegin();
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -82,6 +82,7 @@ function loop(now){
   draw();
   if (PERF) perfReport(cv, DPR, fishes.length);
   if (frameNo % 15 === 0) updatePanel();
+  lightAcc += dt; if (lightAcc >= 1) { lightAcc = 0; autoLightTick(Date.now()); } // 照明の自動判定は約1秒ごと
   requestAnimationFrame(loop);
 }
 
@@ -96,6 +97,7 @@ export function resize(){
   bubbles.length = 0;
   ORDER.forEach(k => schools[k].timer = 0);
   buildScene();
+  layoutClockBtn();
 }
 
 /* ---------------- 開始 ---------------- */
@@ -103,9 +105,15 @@ initAging(Date.now());
 checkMaintenance(Date.now());
 resize();
 syncFish();
+autoLightTick(Date.now());
 updatePanel();
+showNoticeIfAny();
 let rt = 0;
 window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(resize, 120); });
-document.addEventListener("visibilitychange", () => onVisibility(document.visibilityState === "hidden", Date.now()));
+document.addEventListener("visibilitychange", () => {
+  const hidden = document.visibilityState === "hidden";
+  onVisibility(hidden, Date.now());
+  if (!hidden) { checkMaintenance(Date.now()); showNoticeIfAny(); } // 非表示の間に期日が来た分は「非表示中に実施した」扱い
+});
 window.addEventListener("pagehide", () => save());
 requestAnimationFrame(t => { last = t; requestAnimationFrame(loop); });

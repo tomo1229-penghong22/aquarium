@@ -123,6 +123,12 @@ input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;bac
   padding:6px 14px;border-radius:16px;background:rgba(12,32,34,.55);color:#fff;font-size:.85rem;white-space:nowrap;
   opacity:0;transition:opacity .4s ease;pointer-events:none}
 .fshint.show{opacity:1}
+.clockbtn{position:absolute;z-index:3;margin:0;padding:0;border:0;border-radius:50%;background:transparent;cursor:pointer;
+  touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.clockbtn:focus-visible{outline:2px solid #fff;outline-offset:3px;box-shadow:0 0 0 3px rgba(12,32,34,.6)}
+.tank.is-fs.idle .clockbtn{cursor:none}
+.care p{margin:0 0 4px;font-size:.85rem}
+.care .seg{margin-top:8px}
 .tank.is-fs{padding:0;border-radius:0;background:#000;box-shadow:none}
 .tank.is-fs canvas{width:100%;height:100%;aspect-ratio:auto;border-radius:0}
 .tank.is-fs .rim{display:none}
@@ -142,6 +148,8 @@ input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;bac
     <div class="tank">
       <canvas id="tank" aria-label="熱帯魚が泳ぐ水槽のアニメーション"></canvas>
       <div class="fshint" id="fshint">Esc キーかダブルクリックで元の表示に戻ります</div>
+      <div class="fshint" id="notice" role="status" aria-live="polite"></div>
+      <button type="button" class="clockbtn" id="clockbtn" aria-pressed="true" aria-label="時間の経過:オン。押すとオフにします"></button>
       <div class="ctl">
         <button type="button" class="ctlbtn lightbtn" id="fslight" aria-label="照明を切り替える"></button>
         <button type="button" class="ctlbtn" id="fsbtn" aria-label="全画面表示 (F)" title="全画面表示 (F)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
@@ -186,6 +194,14 @@ input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;bac
         <button type="button" data-v="20" aria-pressed="false">20倍</button>
       </div>
       <div class="hint">水温による体調の変化だけを早送りします。適温に戻すと少しずつ回復します。</div>
+    </div>
+    <div class="sec care">
+      <h2>水槽の手入れ</h2>
+      <p id="agingstate"></p>
+      <p id="lastclean"></p>
+      <p id="lastfilter"></p>
+      <div class="seg"><button type="button" id="resetbtn" aria-label="水槽をリセット">水槽をリセット</button></div>
+      <div class="hint">汚れ・苔・水草・フィルターの状態を新品に戻します。魚の数と水温は変わりません。</div>
     </div>
   </aside>
 </div>

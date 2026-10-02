@@ -31,7 +31,9 @@ function classList() {
 function mkel(extra = {}) {
   return {
     children: [], style: {}, dataset: { v: "1" }, value: 25, textContent: "", innerHTML: "", title: "",
-    classList: classList(), appendChild(c) { this.children.push(c); }, addEventListener: noop, setAttribute: noop,
+    classList: classList(), appendChild(c) { this.children.push(c); },
+    L: {}, addEventListener(t, f) { (this.L[t] ??= []).push(f); },
+    attrs: {}, setAttribute(k, v) { this.attrs[k] = String(v); },
     querySelector: () => null, matches: () => false,
     getBoundingClientRect: () => ({ left: 0, top: 0, right: 304, bottom: 190, width: 304, height: 190 }),
     offsetWidth: 320, offsetHeight: 260, ...extra,
@@ -47,6 +49,8 @@ function mkcanvas() {
 }
 const ids = {};
 let rafQ = [];
+let lsLast = null;                 // localStorage.setItem で最後に書かれた値
+let vtimers = null, vclock = 0;    // 仮想タイマ(null の間は setTimeout を即時実行する従来の動作)
 const sandbox = {
   Path2D: class { moveTo() {} lineTo() {} bezierCurveTo() {} quadraticCurveTo() {} closePath() {} },
   document: {
@@ -58,13 +62,14 @@ const sandbox = {
       Object.defineProperty(d, "innerHTML", { set() { d.children = [mkel(), mkel(), mkel()]; }, get() { return ""; } });
       return d;
     },
-    querySelectorAll: () => [], addEventListener: noop, documentElement: mkel(), fullscreenElement: null,
+    querySelectorAll: () => [], L: {}, addEventListener(t, f) { (this.L[t] ??= []).push(f); }, visibilityState: "visible", documentElement: mkel(), fullscreenElement: null,
   },
   window: { devicePixelRatio: 2, addEventListener: noop },
-  localStorage: { getItem: () => null, setItem: noop },
+  localStorage: { getItem: () => null, setItem: (k, v) => { lsLast = v; } },
   performance: { now: () => 0 },
   requestAnimationFrame: f => { rafQ.push(f); return rafQ.length; },
-  setTimeout: f => { f(); return 0; }, clearTimeout: noop,
+  setTimeout: (f, ms) => { if (vtimers) { vtimers.push({ f, at: vclock + (ms || 0), on: true }); return vtimers.length; } f(); return 0; },
+  clearTimeout: id => { if (vtimers && vtimers[id - 1]) vtimers[id - 1].on = false; },
   innerWidth: 1280, innerHeight: 800,
 };
 // モックをグローバルに置いてから、エントリ(js/main.js)を読み込む。読み込み=起動。
@@ -73,6 +78,7 @@ const imp = name => import(pathToFileURL(join(root, "js", name)).href);
 await imp("main.js");
 const [core, sp, beh, pop, ui] = await Promise.all([imp("core.js"), imp("species.js"), imp("fish-behavior.js"), imp("popup.js"), imp("ui.js")]);
 const scene = await imp("scene.js");
+const ag = await imp("aging.js");
 const A = { fishes: beh.fishes, P: pop.P, SPECIES: sp.SPECIES, ORDER: sp.ORDER, counts: core.counts, syncFish: beh.syncFish,
   popReset: pop.popReset, updatePop: pop.updatePop, drawPop: pop.drawPop, startAct: pop.startAct, setPseudo: ui.setPseudo,
   setT: v => core.setTset(v), getT: () => core.Tw, setTimeScale: v => core.setTimeScale(v), setNight: v => core.setNightOn(v), getNightT: () => core.nightT };
@@ -170,6 +176,72 @@ for (const sp of A.ORDER) {
   let err = null;
   try { scene.drawClock(); } catch (e) { err = e; }
   check("24時間計の描画関数が例外なく呼べる", !err, err ? String(err) : "");
+}
+
+{
+  // 時計ボタン(時間経過の ON/OFF)・リセットの2段階・照明の自動化
+  const fire = (id, t, e = {}) => (ids[id].L[t] || []).forEach(f => f(e));
+  const savedOn = () => JSON.parse(lsLast).aging.on;
+  const lab = () => ids.clockbtn.attrs["aria-label"];
+  ag.restoreAging(null, Date.now()); core.save();
+  const on0 = ag.agingOn;
+  fire("clockbtn", "click"); const off1 = !ag.agingOn && savedOn() === false && ids.clockbtn.attrs["aria-pressed"] === "false" && lab() === "時間の経過:オフ。押すとオンにします";
+  fire("clockbtn", "click"); const on2 = ag.agingOn && savedOn() === true && ids.clockbtn.attrs["aria-pressed"] === "true" && lab() === "時間の経過:オン。押すとオフにします";
+  check("時計ボタンのクリックで agingOn が反転し、保存データの aging.on が変わる", on0 && off1 && on2, `既定 ${on0} / 1回目 ${off1} / 2回目 ${on2}`);
+  let stopped = false; fire("clockbtn", "dblclick", { stopPropagation() { stopped = true; } });
+  check("時計ボタンの dblclick は伝播を止める(全画面にならない)", stopped);
+  check("時計ボタンの位置・大きさが設定される(中心 (0.045W, H-46U)、直径 56U)", (() => {
+    const g = scene.clockGeom(), st = ids.clockbtn.style;
+    return parseFloat(st.width) === 2 * g.r && parseFloat(st.height) === 2 * g.r && Math.abs(parseFloat(st.left) + g.r - core.W * 0.045) < 1e-6 && Math.abs(parseFloat(st.top) + g.r - (core.H - 46 * core.U)) < 1e-6;
+  })(), `left ${ids.clockbtn.style.left} top ${ids.clockbtn.style.top} size ${ids.clockbtn.style.width}`);
+  let e1 = null; ag.setAgingOn(false); try { scene.drawClock(); } catch (e) { e1 = e; } ag.setAgingOn(true);
+  check("24時間計の描画(OFF)が例外なく呼べる", !e1, e1 ? String(e1) : "");
+
+  // リセットの2段階(仮想タイマ)
+  vtimers = []; vclock = 0;
+  const adv = ms => { vclock += ms; vtimers.filter(t => t.on && t.at <= vclock).forEach(t => { t.on = false; t.f(); }); };
+  const OLD = Date.now() - 5 * 86400000;
+  ag.setAgingState({ dirt: 0.7, algaeGlass: 0.5, algaeHard: 0.4, clog: 0.6, growth: 0.8, lastClean: OLD, lastFilter: OLD });
+  const label0 = "水槽をリセット";
+  fire("resetbtn", "click");
+  const step1 = ag.dirt === 0.7 && ag.clog === 0.6 && ag.lastClean === OLD && ids.resetbtn.textContent === "もう一度押すとリセット" && ids.resetbtn.attrs["aria-label"] === "もう一度押すと水槽をリセットします";
+  adv(3900); const still = ids.resetbtn.textContent === "もう一度押すとリセット";
+  adv(200); const back = ids.resetbtn.textContent === label0 && ids.resetbtn.attrs["aria-label"] === "水槽をリセット" && ag.dirt === 0.7;
+  check("リセット:1回目は状態不変で文言が変わり、4秒で元に戻る", step1 && still && back, `1回目 ${step1} / 3.9秒 ${still} / 4.1秒 ${back}`);
+  const nFish = A.fishes.length, T0 = core.Tset, t1 = Date.now();
+  fire("resetbtn", "click"); fire("resetbtn", "click");
+  check("リセット:2回目で dirt・clog 等が 0、last* が now(魚の数・水温は不変)",
+    ag.dirt === 0 && ag.algaeGlass === 0 && ag.algaeHard === 0 && ag.clog === 0 && ag.growth === 0 && ag.lastClean >= t1 && ag.lastFilter >= t1 && A.fishes.length === nFish && core.Tset === T0 && ids.resetbtn.textContent === label0,
+    `dirt ${ag.dirt} clog ${ag.clog} lastClean-now ${ag.lastClean - t1}ms`);
+  vtimers = null;
+
+  // 照明の自動化(ui.autoLightTick:前回の段階を覚え、変わったときだけ setNight)
+  const jst = (y, m, d, hh, mm) => Date.UTC(y, m, d, hh - 9, mm);
+  const st = ag.sunTimes(new Date(2026, 5, 21, 12)); // 6/21(東京)
+  const nightNow = () => core.nightOn;
+  ag.setAgingOn(true);
+  fire("clockbtn", "click"); fire("clockbtn", "click"); // 前回の段階を null に戻す(OFF→ON)
+  ui.autoLightTick(jst(2026, 5, 21, 3, 0)); const s1 = nightNow() === true;                 // 起動時:夜を即適用
+  A.setNight(false); ui.autoLightTick(jst(2026, 5, 21, 3, 30)); const s2 = nightNow() === false; // 同じ段階 → 手動の昼を保つ
+  ui.autoLightTick(st.sunrise + 3600000 - 60000); const s3 = nightNow() === false;            // まだ夜の段階 → 保つ
+  A.setNight(true); ui.autoLightTick(st.sunrise + 3600000 + 60000); const s4 = nightNow() === false; // 日の出+1h をまたぐ → 昼
+  A.setNight(true); ui.autoLightTick(st.sunset + 1800000 - 60000); const s5 = nightNow() === true;   // 昼の間は apply しない
+  A.setNight(false); ui.autoLightTick(st.sunset + 1800000 - 30000); const s6 = nightNow() === false;
+  ui.autoLightTick(st.sunset + 1800000 + 60000); const s7 = nightNow() === true;              // 日没+30m をまたぐ → 夜
+  check("autoLightTick:起動時に適用/段階が変わるまで手動を保つ/日の出+1h で昼へ/日没+30m で夜へ", s1 && s2 && s3 && s4 && s5 && s6 && s7, [s1, s2, s3, s4, s5, s6, s7].join(","));
+  // hidden 中に期日をまたいで visible に戻ると、清掃が実施され案内が出る
+  vtimers = [];
+  ag.setAgingOn(true); ag.takeNotice(); ids.notice.textContent = ""; ids.notice.classList.remove("show");
+  ag.setAgingState({ dirt: 0.6, lastClean: Date.now() - 3 * 86400000, lastFilter: Date.now() });
+  document.visibilityState = "visible";
+  (document.L.visibilitychange || []).forEach(f => f());
+  check("hidden 中に期日をまたいで visible に戻ると清掃が実施され案内が出る", ag.dirt === 0 && Date.now() - ag.lastClean < 5000 && ids.notice.textContent === "留守の間に水替えと水槽の清掃をしました" && ids.notice.classList.contains("show"),
+    `dirt ${ag.dirt} 案内「${ids.notice.textContent}」`);
+  vtimers = null;
+  A.setNight(false); ag.setAgingOn(false);
+  ui.autoLightTick(jst(2026, 5, 21, 23, 0)); const offOK = nightNow() === false;
+  check("autoLightTick:OFF 中は動かない", offOK);
+  ag.setAgingOn(true); A.setNight(false);
 }
 
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて成功");

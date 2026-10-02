@@ -30,6 +30,12 @@ if (childMode === "sun") {
   console.log(JSON.stringify(out));
   process.exit(0);
 }
+if (childMode === "phase") {
+  installMocks(null);
+  const ag = await imp("aging.js");
+  console.log(JSON.stringify([ag.lightPhase(Date.UTC(2026, 5, 20, 23, 30)), ag.lightPhase(Date.UTC(2026, 5, 21, 14, 0))]));
+  process.exit(0);
+}
 if (childMode === "load") {
   installMocks(process.env.AGING_LS);
   const core = await imp("core.js"), ag = await imp("aging.js");
@@ -69,6 +75,27 @@ const child = (mode, env = {}) => {
     });
     check("sunTimes:TZ=UTC と TZ=Asia/Tokyo で同じ瞬間", JSON.stringify(a) === JSON.stringify(b));
   }
+}
+
+/* --- lightPhase / autoLightStep / noticeMessage --- */
+{
+  const jst = (y, m, d, hh, mm) => Date.UTC(y, m, d, hh - 9, mm);
+  const H1 = 3600000;
+  for (const [y, m, d] of [[2026, 5, 21], [2026, 11, 22]]) {
+    const st = ag.sunTimes(new Date(y, m, d, 12)), tag = `${y}-${m + 1}-${d}`;
+    check(`lightPhase ${tag}:0時〜日の出+1h は night`, ag.lightPhase(jst(y, m, d, 0, 0)) === "night" && ag.lightPhase(st.sunrise + H1 - 60000) === "night" && ag.lightPhase(st.sunrise) === "night");
+    check(`lightPhase ${tag}:日の出+1h 〜 日没+30m は day`, ag.lightPhase(st.sunrise + H1 + 60000) === "day" && ag.lightPhase(jst(y, m, d, 12, 0)) === "day" && ag.lightPhase(st.sunset + 1800000 - 60000) === "day");
+    check(`lightPhase ${tag}:日没+30m 以降〜24時は night`, ag.lightPhase(st.sunset + 1800000 + 60000) === "night" && ag.lightPhase(jst(y, m, d, 23, 59)) === "night");
+    const a = ag.autoLightStep("night", st.sunrise + H1 - 60000), b = ag.autoLightStep("night", st.sunrise + H1 + 60000), c = ag.autoLightStep("day", st.sunrise + H1 + 120000),
+      d2 = ag.autoLightStep("day", st.sunset + 1800000 + 60000), e = ag.autoLightStep(null, jst(y, m, d, 12, 0));
+    check(`autoLightStep ${tag}:日の出+1h をまたぐと day へ・その間は apply しない・日没+30m で night へ・null は即適用`,
+      a.phase === "night" && !a.apply && b.phase === "day" && b.apply && c.phase === "day" && !c.apply && d2.phase === "night" && d2.apply && e.phase === "day" && e.apply);
+  }
+  const tz = child("phase", { TZ: "UTC" }), tk = child("phase", { TZ: "Asia/Tokyo" });
+  check("lightPhase:TZ=UTC と TZ=Asia/Tokyo で同じ結果(JST 6/21 8:30 は UTC 前日 23:30 でも day、JST 23:00 は night)", !tz.error && !tk.error && JSON.stringify(tz) === JSON.stringify(tk) && tz[0] === "day" && tz[1] === "night", tz.error || tk.error || JSON.stringify(tz));
+  const n = (c, f) => ag.noticeMessage({ cleaned: c, filtered: f });
+  check("案内の文言:清掃のみ/フィルターのみ/両方/なし",
+    n(true, false) === "留守の間に水替えと水槽の清掃をしました" && n(false, true) === "留守の間にフィルターを掃除しました" && n(true, true) === "留守の間に水替え・清掃とフィルターの掃除をしました" && n(false, false) === "" && ag.noticeMessage(null) === "");
 }
 
 /* --- DOsat --- */

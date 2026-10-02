@@ -166,3 +166,25 @@ export function onVisibility(hidden, now){
 /* 案内用:未表示のメンテ実施内容を取り出す(なければ null) */
 export function takeNotice(){ const p = pending; pending = null; return p; }
 export function hasNotice(){ return !!pending; }
+
+/* ---------------- 照明の自動化(日の出+1h 〜 日没+30m が昼) ---------------- */
+const HOUR_MS = 3600000;
+/* now:epoch ms。東京の日付で日の出・日没を求める(端末の TZ に依存しない)。
+   0 時〜日の出+1h は前日の日没の後なので "night"、日没+30m 以降も "night" */
+export function lightPhase(now){
+  const t = new Date(now + 9 * HOUR_MS); // UTC フィールドが東京の暦日時
+  const { sunrise, sunset } = sunTimes(new Date(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate(), 12));
+  return now >= sunrise + HOUR_MS && now < sunset + 30 * 60000 ? "day" : "night";
+}
+/* 段階が変わったときだけ apply=true。prevPhase が null(起動時・ON に戻した時)なら常に apply=true */
+export function autoLightStep(prevPhase, now){
+  const phase = lightPhase(now);
+  return { phase, apply: phase !== prevPhase };
+}
+
+/* ---------------- メンテの案内文 ---------------- */
+export function noticeMessage(n){
+  if (!n || (!n.cleaned && !n.filtered)) return "";
+  if (n.cleaned && n.filtered) return "留守の間に水替え・清掃とフィルターの掃除をしました";
+  return n.cleaned ? "留守の間に水替えと水槽の清掃をしました" : "留守の間にフィルターを掃除しました";
+}

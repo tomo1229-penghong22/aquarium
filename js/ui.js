@@ -1,10 +1,12 @@
 // パネル(魚の選択・水温・照明)と全画面表示。
 // main.js の resize を呼ぶため、main.js とは循環 import になる(関数の中でだけ使うので問題ない)。
-import { Tset, Tw, U, clamp, counts, ctx, cv, nightOn, save, setCtx, setNightOn, setTimeScale, setTset, setU, tankEl } from "./core.js";
+import { H, Tset, Tw, U, W, clamp, counts, ctx, cv, nightOn, save, setCtx, setNightOn, setTimeScale, setTset, setU, tankEl } from "./core.js";
 import { ORDER, SPECIES } from "./species.js";
 import { PAINT } from "./fish-render.js";
 import { fishes, syncFish } from "./fish-behavior.js";
 import { P, bindPop, closePop } from "./popup.js";
+import { agingOn, autoLightStep, checkMaintenance, hasNotice, lastClean, lastFilter, noticeMessage, resetAging, setAgingOn, takeNotice } from "./aging.js";
+import { clockGeom } from "./scene.js";
 import { resize } from "./main.js";
 
 /* ---------------- パネル ---------------- */
@@ -116,6 +118,63 @@ document.addEventListener("keydown", e => {
   if (isFS()) wake();
 });
 
+/* ---------------- 時間の経過(24時間計のボタン)・照明の自動化・メンテの案内・リセット ---------------- */
+const clockBtn = document.getElementById("clockbtn");
+/* 24時間計の位置へ透明なボタンを重ねる。論理座標は canvas の CSS サイズと同じ単位なので、canvas の左上(.tank 基準)に足すだけでよい。resize() のたびに呼ぶ */
+export function layoutClockBtn(){
+  const { x, y, r } = clockGeom(), ox = cv.offsetLeft || 0, oy = cv.offsetTop || 0;
+  const s = clockBtn.style;
+  s.left = `${ox + x - r}px`; s.top = `${oy + y - r}px`; s.width = s.height = `${2 * r}px`;
+}
+function syncClockBtn(){
+  clockBtn.setAttribute("aria-pressed", String(agingOn));
+  clockBtn.setAttribute("aria-label", agingOn ? "時間の経過:オン。押すとオフにします" : "時間の経過:オフ。押すとオンにします");
+  clockBtn.title = agingOn ? "時間の経過:オン(押すとオフ)" : "時間の経過:オフ(押すとオン)";
+}
+let lastPhase = null; // 前回の自動判定("day" / "night")。null なら次の判定で必ず適用する
+/* 段階が変わったときだけ照明を切り替える(手動の切り替えは次に段階が変わるまで保たれる)。ON のときだけ動く */
+export function autoLightTick(now){
+  if (!agingOn) return;
+  const { phase, apply } = autoLightStep(lastPhase, now);
+  lastPhase = phase;
+  if (apply) setNight(phase === "night");
+}
+const noticeEl = document.getElementById("notice");
+let noticeTimer = 0;
+/* 未表示のメンテ実施内容があれば、水槽上部に約3秒の案内を出す */
+export function showNoticeIfAny(){
+  if (!hasNotice()) return;
+  const msg = noticeMessage(takeNotice());
+  if (!msg) return;
+  noticeEl.textContent = msg; noticeEl.classList.add("show");
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => noticeEl.classList.remove("show"), 3000);
+}
+function toggleAging(){
+  setAgingOn(!agingOn); syncClockBtn();
+  if (agingOn) { const now = Date.now(); checkMaintenance(now); lastPhase = null; autoLightTick(now); showNoticeIfAny(); }
+  updatePanel();
+}
+clockBtn.addEventListener("click", toggleAging);
+clockBtn.addEventListener("dblclick", e => e.stopPropagation()); // 全画面の切り替えを起こさない
+syncClockBtn();
+
+const resetBtn = document.getElementById("resetbtn");
+let resetArmed = false, resetTimer = 0;
+function setResetUI(armed){
+  resetArmed = armed;
+  resetBtn.textContent = armed ? "もう一度押すとリセット" : "水槽をリセット";
+  resetBtn.setAttribute("aria-label", armed ? "もう一度押すと水槽をリセットします" : "水槽をリセット");
+}
+resetBtn.addEventListener("click", () => {
+  clearTimeout(resetTimer);
+  if (!resetArmed) { setResetUI(true); resetTimer = setTimeout(() => setResetUI(false), 4000); return; }
+  setResetUI(false);
+  resetAging(Date.now()); updatePanel();
+});
+const stateEl = document.getElementById("agingstate"), lcEl = document.getElementById("lastclean"), lfEl = document.getElementById("lastfilter");
+const dateJa = ms => { const d = new Date(ms); return `${d.getMonth() + 1}月${d.getDate()}日`; };
+
 function tempStatus(T){
   if (T < 21) return ["冷たすぎます", "代謝が落ちて動きが鈍くなり、底のほうでじっとしがちです。長く続くと体力や抵抗力が落ちやすくなります。", "#dbe6f4"];
   if (T < 23) return ["やや低めです", "動きが少しゆっくりになります。種類によっては物足りない温度です。", "#e0ecef"];
@@ -142,5 +201,9 @@ export function updatePanel(){
     const h = list.reduce((s, f) => s + f.health, 0) / list.length;
     html += `<div class="lbl">${SPECIES[sp].name}<small>${condLabel(h)}</small></div><div class="bar"><i style="width:${Math.round(h * 100)}%;background:${condColor(h)}"></i></div>`;
   });
+  stateEl.textContent = `時間の経過:${agingOn ? "オン" : "オフ"}(時計を押して切り替え)`;
+  lcEl.textContent = `前回の水替え:${dateJa(lastClean)}`;
+  lfEl.textContent = `前回のフィルター掃除:${dateJa(lastFilter)}`;
+  syncClockBtn();
   condEl.innerHTML = html || `<div class="empty">魚を選ぶと、ここに体調が表示されます。</div>`;
 }

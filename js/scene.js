@@ -1,5 +1,6 @@
 // 水槽の情景(配置・水草・光・水面・温度計・ガラス・エアストーン・泡)の生成と描画。
 import { DPR, H, TAU, Tw, U, W, clamp, ctx, current, lerp, mix, mulberry, nightT, noise1, sandY, waterTop } from "./core.js";
+import { agingOn } from "./aging.js";
 
 /* ---- 情景の状態(buildScene が作り直す) ---- */
 export let staticNight = null, staticLayer = null, plants = { back: [], mid: [], front: [] }, rocks = [];
@@ -605,19 +606,20 @@ export function clockHourAngle(h, m){ return ((h + m / 60) / 24) * 360; }
 export function drawClock(){
   // 左下。温度計と同じ x。半径 28U、下端は水槽の底から 18U 上。U = min(W/1000, H/625) なので
   // 上端(吸盤込み)H-85U は常に H*0.864 以下 → 温度計の℃ラベル(下端 約 0.585H+21U ≒ 0.62H 以下)と重ならない。
-  const r = 28 * U, x = W * 0.045, y = H - 46 * U;
+  // 位置・大きさは clockGeom() と共通(ui.js が透明なボタンを重ねる)。時間経過が OFF のときはグレー系で淡く描く(針は動く)。
+  const { x, y, r } = clockGeom(), on = agingOn;
   const now = new Date(), ang = clockHourAngle(now.getHours(), now.getMinutes()) * Math.PI / 180;
   const at = (a, d) => [x + Math.sin(a) * d, y - Math.cos(a) * d];
   ctx.save();
   // 吸盤
-  ctx.fillStyle = "rgba(235,245,245,0.45)";
+  ctx.fillStyle = on ? "rgba(235,245,245,0.45)" : "rgba(215,218,218,0.4)";
   ctx.beginPath(); ctx.ellipse(x, y - r - 3 * U, 9 * U, 5 * U, 0, 0, TAU); ctx.fill();
   // 文字盤(半透明のガラス)
   ctx.beginPath(); ctx.arc(x, y, r, 0, TAU);
-  ctx.fillStyle = "rgba(245,250,250,0.32)"; ctx.fill();
-  ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.lineWidth = 1.5 * U; ctx.stroke();
+  ctx.fillStyle = on ? "rgba(245,250,250,0.32)" : "rgba(222,224,224,0.66)"; ctx.fill();
+  ctx.strokeStyle = on ? "rgba(255,255,255,0.8)" : "rgba(150,155,155,0.85)"; ctx.lineWidth = 1.5 * U; ctx.stroke();
   // 目盛(1時間ごと、6時間ごとは太く長く)
-  ctx.strokeStyle = "rgba(30,40,40,0.75)"; ctx.lineCap = "round";
+  ctx.strokeStyle = on ? "rgba(30,40,40,0.75)" : "rgba(70,76,76,0.8)"; ctx.lineCap = "round";
   for (let i = 0; i < 24; i++) {
     const a = i / 24 * TAU, big = i % 6 === 0;
     const [x0, y0] = at(a, r * (big ? 0.76 : 0.85)), [x1, y1] = at(a, r * 0.94);
@@ -625,16 +627,22 @@ export function drawClock(){
     ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
   }
   // 数字(0・6・12・18)
-  ctx.fillStyle = "rgba(20,30,30,0.9)";
+  ctx.fillStyle = on ? "rgba(20,30,30,0.9)" : "rgba(60,66,66,0.9)";
   ctx.font = `600 ${Math.max(8, 8.5 * U)}px "Zen Kaku Gothic New", sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
   [0, 6, 12, 18].forEach(hh => { const [tx, ty] = at(hh / 24 * TAU, r * 0.55); ctx.fillText(String(hh), tx, ty); });
   // 時針(1本のみ)
-  const [hx, hy] = at(ang, r * 0.7);
-  ctx.strokeStyle = "#d8322b"; ctx.lineWidth = 2 * U;
+  const [hx, hy] = at(ang, r * 0.7), hc = on ? "#d8322b" : "#4a5050";
+  if (!on) { // OFF:明るい縁取りで、昼夜どちらの背景でも針を読めるようにする
+    ctx.strokeStyle = "rgba(240,243,243,0.85)"; ctx.lineWidth = 4.2 * U;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(hx, hy); ctx.stroke();
+  }
+  ctx.strokeStyle = hc; ctx.lineWidth = 2 * U;
   ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(hx, hy); ctx.stroke();
-  ctx.fillStyle = "#d8322b"; ctx.beginPath(); ctx.arc(x, y, 2.2 * U, 0, TAU); ctx.fill();
+  ctx.fillStyle = hc; ctx.beginPath(); ctx.arc(x, y, 2.2 * U, 0, TAU); ctx.fill();
   ctx.restore();
 }
+/* 24時間計の中心と半径(論理座標。canvas の CSS サイズと同じ単位) */
+export function clockGeom(){ return { x: W * 0.045, y: H - 46 * U, r: 28 * U }; }
 
 /* ---------------- ガラスの映り込み ---------------- */
 function nightGrade(n){
