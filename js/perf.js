@@ -19,7 +19,8 @@ export function parsePerfParams(search){
     if (LAYERS.includes(n) || SPECIAL.includes(n)) { if (!skip.includes(n)) skip.push(n); }
     else if (!unknown.includes(n)) unknown.push(n);
   }
-  return { perf, bench, skip: perf ? skip : [], unknown: perf ? unknown : [] };
+  const benchCum = bench && /[?&]bench=cum(&|$)/.test(s);   // 積み上げ式の bench
+  return { perf, bench, benchCum, skip: perf ? skip : [], unknown: perf ? unknown : [] };
 }
 const PARAMS = parsePerfParams(typeof location !== "undefined" ? location.search : "");
 export const PERF = PARAMS.perf;
@@ -63,7 +64,7 @@ export function perfEnd(name){                                           // 開�
 }
 
 /* ---------------- ?perf&bench:条件を自動で切り替えて計測 ---------------- */
-const BENCH = { initMs: 3000, warmMs: 1500, measMs: 10000 };
+const BENCH = { initMs: 3000, warmMs: 1500, measMs: PARAMS.benchCum ? 6000 : 10000 }; // bench=cum は 1 条件が短い(往復で時間の揺れを相殺する)
 let B = null;   // 実行中の状態。bench でなければ null
 export const benchOn = () => !!B && B.phase !== "done"; // 実行中は main が照明の自動切り替えを止める
 /* 条件の一覧(昼・夜の順に、基準 → 各層 1 つずつ → 特別な名前 → static 以外すべて) */
@@ -77,13 +78,43 @@ export function benchConditions(){
   }
   return out;
 }
+/* 積み上げ式の条件(bench=cum)。層の並びは draw の順。static は常に描き、k = 足した層の数(0〜19)。
+   昼・夜それぞれ 往路 k=0→19、復路 k=19→0(grade は gradeDay・gradeNight を含めて 1 層。特別な名前は対象外) */
+export function cumConditions(){
+  const add = LAYERS.filter(n => n !== "static"), out = [];
+  for (const night of [false, true]) {
+    for (const dir of ["fwd", "back"]) {
+      for (let j = 0; j <= add.length; j++) {
+        const k = dir === "fwd" ? j : add.length - j;
+        out.push({ name: k === 0 ? "static" : add[k - 1], night, dir, k, skip: add.slice(k) });
+      }
+    }
+  }
+  return out;
+}
+/* 往路と復路の同じ k の値を平均し、増分(k の累積平均 − k−1 の累積平均)を付ける。mean を主指標にする */
+export function cumSummary(results){
+  const out = [];
+  for (const mode of ["day", "night"]) {
+    const rows = [];
+    for (let k = 0; ; k++) {
+      const rs = results.filter(r => r.mode === mode && r.k === k);
+      if (!rs.length) break;
+      const avg = key => rs.reduce((a, r) => a + r[key], 0) / rs.length;
+      const fwd = rs.find(r => r.dir === "fwd"), back = rs.find(r => r.dir === "back");
+      rows.push({ mode, k, layer: rs[0].cond, meanAvg: avg("mean"), medianAvg: avg("median"), p95Avg: avg("p95"), jsMsAvg: avg("jsMs"), meanFwd: fwd?.mean, meanBack: back?.mean, increment: k === 0 ? 0 : avg("mean") - rows[k - 1].meanAvg });
+    }
+    out.push(...rows);
+  }
+  return out;
+}
 /* main.js から呼ぶ。hooks:{ fx():FX フラグを SKIP に合わせる, resize(), night(v):照明を切り替える(保存しない), isNight(), freezeSave() } */
 export function perfBenchInit(hooks){
   if (!PARAMS.bench || B) return;
   if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && B && (B.phase === "warm" || B.phase === "meas")) B.dirty = true; });
   hooks.freezeSave();               // 保存データを書き換えない(計測が終わっても解除しない)
   GOV.override = 0;                 // 性能による「なめた跡」の自動オフを止める(条件間で状態が変わらないように)
-  const conds = benchConditions();
+  const conds = PARAMS.benchCum ? cumConditions() : benchConditions();
   B = { retries: 0, dirty: false, hooks, conds, i: -1, phase: "init", t0: performance.now(), mStart: 0, frames: [], js: 0, jsN: 0, results: [], origNight: hooks.isNight() };
 }
 function benchStart(i){
@@ -107,7 +138,7 @@ function benchFrame(now){
   if (prev && prev >= B.mStart) B.frames.push(now - prev);
   if (t - B.mStart < BENCH.measMs) return;
   const c = B.conds[B.i], st = B.frames.length ? stat(B.frames) : { avg: NaN, med: NaN, p95: NaN };
-  B.results.push({ cond: c.name, mode: c.night ? "night" : "day", skip: c.skip.slice(), median: st.med, p95: st.p95, mean: st.avg, jsMs: B.jsN ? B.js / B.jsN : NaN, frames: B.frames.length, retries: B.retries });
+  B.results.push({ cond: c.name, mode: c.night ? "night" : "day", ...(c.dir ? { dir: c.dir, k: c.k } : {}), skip: c.skip.slice(), median: st.med, p95: st.p95, mean: st.avg, jsMs: B.jsN ? B.js / B.jsN : NaN, frames: B.frames.length, retries: B.retries });
   if (B.i + 1 < B.conds.length) benchStart(B.i + 1); else benchFinish();
 }
 function benchFinish(){
@@ -116,16 +147,32 @@ function benchFinish(){
   setSkip(URL_SKIP); h.fx();                // URL で指定した状態へ戻す
   h.resize();                               // DPR の上限も URL の指定へ戻す
   if (h.isNight() !== B.origNight) h.night(B.origNight);
-  for (const r of B.results) {              // 基準(同じ昼夜の base)との中央値の差
+  const cum = PARAMS.benchCum;
+  if (!cum) for (const r of B.results) {    // 基準(同じ昼夜の base)との中央値の差
     const base = B.results.find(x => x.mode === r.mode && x.cond === "base");
     r.diffMedian = base ? r.median - base.median : NaN;
   }
-  const out = { env: { canvas: info.canvas, dpr: info.dpr, ua: typeof navigator !== "undefined" ? navigator.userAgent : "", warmMs: BENCH.warmMs, measMs: BENCH.measMs }, results: B.results };
+  const out = { env: { canvas: info.canvas, dpr: info.dpr, ua: typeof navigator !== "undefined" ? navigator.userAgent : "", warmMs: BENCH.warmMs, measMs: BENCH.measMs, kind: cum ? "cum" : "each" }, results: B.results };
+  if (cum) out.summary = cumSummary(B.results);
   window.__bench = out;
   console.log("[bench] " + JSON.stringify(out));
   showBenchTable(out);
 }
+function showCumTable(out){
+  const f = v => (Number.isFinite(v) ? v.toFixed(1) : "-").padStart(7);
+  const d = v => (Number.isFinite(v) ? (v >= 0 ? "+" : "") + v.toFixed(1) : "-").padStart(7);
+  const day = out.summary.filter(r => r.mode === "day"), night = out.summary.filter(r => r.mode === "night");
+  const retry = m => out.results.filter(r => r.mode === m).reduce((a, r) => a + r.retries, 0);
+  const lines = [`bench=cum 完了(フレーム間隔の平均 ms。往復平均。増分=その層を足した分。やり直し 昼${retry("day")} 夜${retry("night")})`, `${"層".padEnd(14)}| 昼 累積平均   増分 | 夜 累積平均   増分`];
+  day.forEach((r, i) => { const n = night[i]; lines.push((i ? "+" : " ") + r.layer.padEnd(13) + `|${f(r.meanAvg)}${d(r.increment)} |${n ? f(n.meanAvg) + d(n.increment) : ""}`); });
+  const tb = document.createElement("pre");
+  tb.setAttribute("aria-hidden", "true");
+  tb.style.cssText = "position:fixed;right:4px;top:4px;z-index:99999;margin:0;padding:4px 6px;background:rgba(0,0,0,.75);color:#ff9;font:10px/1.25 ui-monospace,Menlo,Consolas,monospace;pointer-events:none;white-space:pre";
+  tb.textContent = lines.join("\n");
+  document.body.appendChild(tb);
+}
 function showBenchTable(out){
+  if (out.summary) { showCumTable(out); return; }
   const day = out.results.filter(r => r.mode === "day"), night = out.results.filter(r => r.mode === "night");
   const f = v => (Number.isFinite(v) ? v.toFixed(1) : "-").padStart(6);
   const d = v => (Number.isFinite(v) ? (v >= 0 ? "+" : "") + v.toFixed(1) : "-").padStart(6);
@@ -142,7 +189,7 @@ function benchLine(){
   if (B.phase === "init") return "\nbench 開始待ち";
   if (B.phase === "done") return "\nbench 完了";
   const c = B.conds[B.i];
-  return `\nbench 条件 ${B.i + 1}/${B.conds.length} ${c.night ? "夜" : "昼"} ${c.name} (${B.phase === "warm" ? "捨て" : "計測"})`;
+  return `\nbench 条件 ${B.i + 1}/${B.conds.length} ${c.night ? "夜" : "昼"} ${c.dir ? (c.dir === "fwd" ? "往 " : "復 ") : ""}${c.name} (${B.phase === "warm" ? "捨て" : "計測"})`;
 }
 
 export function perfReport(cv, dpr, fishCount){                          // 0.5 秒ごとに集計とオーバーレイ更新
