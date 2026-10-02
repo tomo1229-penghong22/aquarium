@@ -2,6 +2,7 @@
 import { TAU, Tw, U, W, bottomY, clamp, counts, lerp, timeScale, waterTop } from "./core.js";
 import { ORDER, SPECIES } from "./species.js";
 import { spawnBubble } from "./scene.js";
+import { DO, hypoxia } from "./aging.js";
 
 /* 群れる種(school > 0.5)の形の調整。前後方向に一列に並ばないようにする */
 const SCHOOL_VSPREAD = 1.0; // 目標位置の縦の散らばり(従来 0.6)
@@ -12,8 +13,12 @@ export const fishes = [];
 export const schools = {};
 ORDER.forEach(k => schools[k] = { x: 0, y: 0, cx: 0, cy: 0, timer: 0 });
 
-function effectiveZone(S){
-  const cold = clamp((23 - Tw) / 5, 0, 1), hot = clamp((Tw - 29) / 4, 0, 1);
+/* 低酸素(DO < 3.0 mg/L)での体調低下:rate = HYPOXIA_K × ((3 − DO)/3)² / hardy [/秒]。DO=1 で約 3 分(1.0→0.4)、DO=0 で約 2 分(1.0→0.04) */
+const HYPOXIA_DO = 3.0, HYPOXIA_K = 0.0075;
+
+/* hyp:低酸素係数(既定は現在の DO から)。水面へ寄る強さは、暑さ係数と低酸素係数の大きいほう(水面呼吸) */
+export function effectiveZone(S, hyp = hypoxia(DO)){
+  const cold = clamp((23 - Tw) / 5, 0, 1), hot = Math.max(clamp((Tw - 29) / 4, 0, 1), hyp);
   let a = S.zone[0], b = S.zone[1];
   a = lerp(a, 0.55, cold * 0.6); b = lerp(b, 0.95, cold * 0.6);
   a = lerp(a, 0.0, hot * 0.9); b = lerp(b, 0.16, hot * 0.9);
@@ -50,14 +55,19 @@ function activity(T){ return T < 26 ? clamp(0.35 + (T - 18) / 8 * 0.65, 0.35, 1)
 export function updateHealth(f, dt){
   const [lo, hi] = SPECIES[f.sp].opt;
   const d = dt * timeScale;
+  const lowDO = DO < HYPOXIA_DO;
   if (Tw < lo) {
     const rate = (lo - Tw) * 0.0011 / f.hardy;
     if (f.health > 0.38) f.health = Math.max(0.38, f.health - rate * d);
   } else if (Tw > hi) {
     const rate = Math.pow(Tw - hi, 1.5) * 0.0007 / f.hardy;
     f.health = Math.max(0.04, f.health - rate * d);
-  } else {
+  } else if (!lowDO) {
     f.health = Math.min(1, f.health + 0.008 * d);
+  }
+  if (lowDO) { // 低酸素:適温でも回復しない。下限は高温と同じ 0.04
+    const x = (HYPOXIA_DO - DO) / HYPOXIA_DO;
+    f.health = Math.max(0.04, f.health - HYPOXIA_K * x * x / f.hardy * d);
   }
   f.pale = clamp((0.85 - f.health) * 1.1, 0, 0.85);
 }
@@ -90,7 +100,7 @@ export function updateSchools(dt){
 export function updateFish(f, dt){
   const S = SPECIES[f.sp];
   const L = S.len * U * f.scale;
-  const hot = clamp((Tw - 29) / 4, 0, 1), cold = clamp((23 - Tw) / 5, 0, 1);
+  const hot = Math.max(clamp((Tw - 29) / 4, 0, 1), hypoxia(DO)), cold = clamp((23 - Tw) / 5, 0, 1);
   const act = activity(Tw) * (0.3 + 0.7 * f.health);
   let tx, ty, speed = S.speed * U * act;
 

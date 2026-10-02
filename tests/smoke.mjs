@@ -244,5 +244,45 @@ for (const sp of A.ORDER) {
   ag.setAgingOn(true); A.setNight(false);
 }
 
+/* ---------------- A4:低酸素の行動と体調 ---------------- */
+{
+  const S = A.SPECIES.neon, hyp = v => beh.effectiveZone(S, v);
+  const prevT = A.getT();
+  A.setT(25); frames(60 * 10); // Tw を 25 に落ち着かせる
+  const z0 = hyp(0), z1 = hyp(1), zh = hyp(0.5), zDef = beh.effectiveZone(S);
+  const bMax = Math.max(...A.ORDER.map(k => beh.effectiveZone(A.SPECIES[k], 1)[1]));
+  A.setTimeScale(20); A.setT(34); frames(60 * 30);
+  const zHot = hyp(0); // 34℃(暑さ最大)での値
+  A.setTimeScale(1);
+  check("effectiveZone:25℃で hypoxia=0 は従来(種の既定)と同じ・既定引数は現在の DO、hypoxia=1 は 34℃ と同じ水面寄り",
+    Math.abs(core.Tw - 34) < 0.05 && z0[0] === S.zone[0] && z0[1] === S.zone[1] && zDef[0] === z0[0] && zDef[1] === z0[1]
+      && z1[0] === zHot[0] && z1[1] === zHot[1] && z1[0] <= 0.16 && zh[1] < z0[1] && zh[1] > z1[1],
+    `hyp0 [${z0.map(v => v.toFixed(3))}] / hyp0.5 [${zh.map(v => v.toFixed(3))}] / hyp1 [${z1.map(v => v.toFixed(3))}] / 全種 hyp1 の下端 最大 ${bMax.toFixed(3)}`);
+  const savedDO = ag.DO;
+  A.setTimeScale(20); A.setT(25); frames(60 * 10); A.setTimeScale(1); // Tw を 25 に落ち着かせる
+  const tw25 = Math.abs(core.Tw - 25) < 0.05;
+  const secTo = (doVal, target, maxSec, sp = "neon") => {
+    const f = beh.makeFish(sp); f.hardy = 1; ag.setAgingState({ DO: doVal });
+    const o = A.SPECIES[sp].opt; let t = 0;
+    while (f.health >= target && t < maxSec) { beh.updateHealth(f, 1); t++; }
+    return { t, h: f.health, opt: o };
+  };
+  const hoursAt = (doVal, sec) => { const f = beh.makeFish("neon"); f.hardy = 1; ag.setAgingState({ DO: doVal }); for (let i = 0; i < sec; i++) beh.updateHealth(f, 1); return f.health; };
+  const r1 = secTo(1.0, 0.4, 3600), h25 = hoursAt(2.5, 300), h3 = hoursAt(3.0, 300), h45 = hoursAt(7.9, 300);
+  check("体調:DO=1.0 で 1.0→0.4 未満まで 2〜5 分", tw25 && r1.t >= 120 && r1.t <= 300, `${(r1.t / 60).toFixed(2)} 分(${r1.t} 秒)`);
+  check("体調:DO=2.5 で 5 分後も 0.6 以上", h25 >= 0.6, `5 分後 ${h25.toFixed(3)}`);
+  check("体調:DO ≥ 3.0 では変化なし(1.0 のまま。弱った魚は従来どおり回復)", h3 === 1 && h45 === 1 && tw25 && (() => {
+    const f = beh.makeFish("neon"); f.hardy = 1; f.health = 0.5; ag.setAgingState({ DO: 3.0 }); beh.updateHealth(f, 10); return Math.abs(f.health - 0.58) < 1e-9;
+  })(), `DO3.0→${h3} DO7.9→${h45}`);
+  check("体調:DO<3.0 では適温でも回復しない", (() => {
+    const f = beh.makeFish("neon"); f.hardy = 1; f.health = 0.5; ag.setAgingState({ DO: 2.9 }); beh.updateHealth(f, 1); return f.health < 0.5;
+  })());
+  const r0 = secTo(0, 0.05, 3600);
+  A.setTimeScale(20); A.setT(34); frames(60 * 30); A.setTimeScale(1);
+  const fh = beh.makeFish("neon"); fh.hardy = 1; ag.setAgingState({ DO: 7.9 }); let th = 0; while (fh.health > 0.0401 && th < 3600) { beh.updateHealth(fh, 1); th++; }
+  check("体調:DO=0 でも暴走しない(34℃ のネオンと同程度以下の速さ)", r0.t >= th * 0.9 && Math.abs(core.Tw - 34) < 0.05, `DO=0 で 0.04 まで ${r0.t} 秒 / 34℃ ネオン ${th} 秒(Tw ${core.Tw.toFixed(2)})`);
+  A.setTimeScale(20); A.setT(prevT); frames(60 * 10); A.setTimeScale(1); ag.setAgingState({ DO: savedDO });
+}
+
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて成功");
 process.exit(failed ? 1 : 0);
