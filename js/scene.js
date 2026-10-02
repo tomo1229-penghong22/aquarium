@@ -2,6 +2,13 @@
 import { DPR, H, TAU, counts, Tw, U, W, clamp, ctx, current, lerp, mix, mulberry, nightT, noise1, sandY, waterTop } from "./core.js";
 import { DO, RATE, agingOn, algaeGlass, algaeHard, clog, dirt, glassMult, growth, hardMult, sinceClean } from "./aging.js";
 
+/* 水草・岩・流木は不透明に描く(層ごとの globalAlpha はやめた。後ろの物が透けて見えない)。
+   かわりに、葉の色を水の澄んだ色(WATER_LT)へ少し寄せて、明るく澄んだ(透過光を受けた)印象を保つ(lt)。奥行きの淡さは、描画順で重なる霞の層(main.js の draw)が受け持つ。 */
+const WATER_LT = "#86cfc3";
+// c は "#rrggbb" か "rgb(r,g,b)"(core.mix の戻り値)のどちらでもよい。(core.mix は "#rrggbb" しか受け付けないので、rgb() を渡すと黒になる)
+const ltRgb = c => c[0] === "#" ? [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)] : c.match(/[\d.]+/g).slice(0, 3).map(Number);
+const lt = (c, k) => { const a = ltRgb(c), b = ltRgb(WATER_LT); return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * k)).join(",")})`; };
+
 /* ---- 情景の状態(buildScene が作り直す) ---- */
 export let staticNight = null, staticLayer = null, plants = { back: [], mid: [], front: [] }, rocks = [];
 let rays = [], motes = [];
@@ -54,7 +61,7 @@ export function buildScene(){
     const x = W * fx, y = sandY(x) + 24 * U, leaves = [];
     for (let i = 0; i < n; i++) {
       leaves.push({ ang: (r() - 0.5) * 1.9, len: depth(x) * (0.22 + r() * 0.16) * s, w: (16 + r() * 8) * U * s,
-        phase: r() * 10, c: mix("#3c7a31", "#5c9a3f", r()) });
+        phase: r() * 10, c: lt(mix("#3c7a31", "#5c9a3f", r()), 0.08) });
     }
     leaves.sort((a, b) => Math.abs(b.ang) - Math.abs(a.ang));
     plants.mid.push({ type: "sword", x, y, leaves });
@@ -66,12 +73,12 @@ export function buildScene(){
     const nb = 5 + Math.floor(r() * 5);
     for (let j = 0; j < nb; j++) blades.push({ type: "ribbon", x: cx + (r() - 0.5) * 18 * U, y: baseY + r() * 4 * U,
       h: (22 + r() * 34) * U, w: 2.4 * U, lean: (r() - 0.5) * 0.7, phase: r() * 10, flex: 0.35, n: 6,
-      c1: "#4f8a38", c2: "#a6d46a", tw: 0, flat: true });
+      c1: lt("#4f8a38", 0.12), c2: lt("#a6d46a", 0.12), tw: 0, flat: true });
     plants.front.push({ type: "tuft", blades });
   }
   for (let i = 0; i < 16; i++) {
     const cx = W * (0.02 + r() * 0.96), baseY = sandY(cx) + (48 + r() * 30) * U, leaves = [];
-    for (let j = 0; j < 14; j++) leaves.push([(r() - 0.5) * 48 * U, -r() * 12 * U, (3.5 + r() * 2.5) * U, r() * TAU, mix("#4f9a3c", "#8fcf5a", r())]);
+    for (let j = 0; j < 14; j++) leaves.push([(r() - 0.5) * 48 * U, -r() * 12 * U, (3.5 + r() * 2.5) * U, r() * TAU, lt(mix("#4f9a3c", "#8fcf5a", r()), 0.12)]);
     plants.front.push({ type: "carpet", x: cx, y: baseY, leaves, phase: r() * 10 });
   }
   // 流木(枝分かれする)
@@ -97,7 +104,7 @@ export function buildScene(){
   for (let i = 0; i < 16; i++) {
     const br = wood[Math.floor(r() * wood.length)], pt = br[1 + Math.floor(r() * (br.length - 2))];
     fern.leaves.push({ bx: pt[0], by: pt[1], ang: (r() - 0.5) * 2.4, len: (45 + r() * 50) * U, w: (10 + r() * 5) * U,
-      phase: r() * 10, c: mix("#2e6a33", "#4d8d3f", r()) });
+      phase: r() * 10, c: lt(mix("#2e6a33", "#4d8d3f", r()), 0.08) });
   }
   // こけ
   moss = [];
@@ -117,7 +124,7 @@ export function buildScene(){
   for (let i = 0; i < 6; i++) {
     const x = W * (0.16 + r() * 0.78), leaves = [], roots = [];
     const nl = 4 + Math.floor(r() * 4);
-    for (let j = 0; j < nl; j++) leaves.push([(r() - 0.5) * 50 * U, (7 + r() * 6) * U, mix("#5d9e3c", "#9fd062", r())]);
+    for (let j = 0; j < nl; j++) leaves.push([(r() - 0.5) * 50 * U, (7 + r() * 6) * U, lt(mix("#5d9e3c", "#9fd062", r()), 0.1)]);
     for (let j = 0; j < 7; j++) roots.push({ dx: (r() - 0.5) * 40 * U, h: (25 + r() * 55) * U, phase: r() * 10 });
     floats.push({ x, leaves, roots, k: r() * 10 });
   }
@@ -323,20 +330,22 @@ function drawLeaf(bx, by, l, t, flex, pet, cBase, cTip, cMid = l.c, dots = null)
   }
 }
 // アマゾンソード:外側(先頭)の古い葉ほど、clog に比例して黄ばむ(内側 4 割の葉は緑のまま)。algaeHard で葉の縁に苔の点
+const SW_A = lt("#2c5c27", 0.08), SW_B = lt("#8cc866", 0.08), FERN_A = lt("#244f28", 0.08), FERN_B = lt("#7fbe5e", 0.08);
 export function drawSword(p, t){
   const n = p.leaves.length, c = clog >= AG_EPS ? clog : 0, a = algaeHard >= AG_EPS;
   p.leaves.forEach((l, i) => {
     const w = c * clamp(1 - i / (n * 0.6), 0, 1) * 0.85;
-    if (!w && !a) return drawLeaf(p.x, p.y, l, t, 0.14, 0.25, "#2c5c27", "#8cc866");
-    if (!w) return drawLeaf(p.x, p.y, l, t, 0.14, 0.25, "#2c5c27", "#8cc866", l.c, l.dots);
-    drawLeaf(p.x, p.y, l, t, 0.14, 0.25, mixC("#2c5c27", "#7d7a2a", w), mixC("#8cc866", "#e0d676", w), mixC(l.c, "#b2ae45", w), a ? l.dots : null);
+    if (!w && !a) return drawLeaf(p.x, p.y, l, t, 0.14, 0.25, SW_A, SW_B);
+    if (!w) return drawLeaf(p.x, p.y, l, t, 0.14, 0.25, SW_A, SW_B, l.c, l.dots);
+    drawLeaf(p.x, p.y, l, t, 0.14, 0.25, mixC(SW_A, "#7d7a2a", w), mixC(SW_B, "#e0d676", w), mixC(l.c, "#b2ae45", w), a ? l.dots : null);
   });
 }
-export function drawFern(p, t){ p.leaves.forEach(l => drawLeaf(l.bx, l.by, l, t, 0.2, 0.05, "#244f28", "#7fbe5e")); }
+export function drawFern(p, t){ p.leaves.forEach(l => drawLeaf(l.bx, l.by, l, t, 0.2, 0.05, FERN_A, FERN_B)); }
+const LOTUS = [lt("#e7866a", 0.06), lt("#c24d44", 0.06), lt("#8e2f33", 0.06)];
 export function drawLotus(p, t){
   p.leaves.forEach(l => {
     const pts = spine({ x: p.x, y: p.y, h: l.len, n: 8, lean: l.ang, flex: 0.2, phase: l.phase }, t);
-    ctx.strokeStyle = "rgba(150,80,65,0.9)"; ctx.lineWidth = 1.7 * U;
+    ctx.strokeStyle = "rgb(150,80,65)"; ctx.lineWidth = 1.7 * U; // 葉柄(不透明)
     ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]); ctx.stroke();
     const [x, y, a] = pts[pts.length - 1];
     ctx.save(); ctx.translate(x, y); ctx.rotate(a + l.tilt + Math.sin(t * 0.8 + l.phase) * 0.08);
@@ -346,7 +355,7 @@ export function drawLotus(p, t){
     leaf.bezierCurveTo(-bw * 0.12, -bh * 0.9, bw * 0.75, -bh * 1.0, bw, 0);
     leaf.bezierCurveTo(bw * 0.75, bh * 1.0, -bw * 0.12, bh * 0.9, bw * 0.06, 0);
     const g = ctx.createLinearGradient(0, -bh, bw, bh);
-    g.addColorStop(0, "#e7866a"); g.addColorStop(0.5, "#c24d44"); g.addColorStop(1, "#8e2f33");
+    g.addColorStop(0, LOTUS[0]); g.addColorStop(0.5, LOTUS[1]); g.addColorStop(1, LOTUS[2]);
     ctx.fillStyle = g; ctx.fill(leaf);
     ctx.save(); ctx.clip(leaf);
     ctx.fillStyle = "rgba(95,25,35,0.35)";
@@ -401,7 +410,7 @@ export function drawFloats(t){
     });
     const leaf = ([dx, r, c]) => {
       const lx = x + dx, ly = surfaceY(lx, t) + 1.5 * U;
-      ctx.fillStyle = "rgba(40,80,40,0.8)"; ctx.beginPath(); ctx.ellipse(lx, ly + 1.2 * U, r, r * 0.28, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = "rgb(40,80,40)"; ctx.beginPath(); ctx.ellipse(lx, ly + 1.2 * U, r, r * 0.28, 0, 0, TAU); ctx.fill();
       ctx.fillStyle = c; ctx.beginPath(); ctx.ellipse(lx, ly, r, r * 0.26, 0, 0, TAU); ctx.fill();
       ctx.fillStyle = "rgba(240,255,210,0.55)"; ctx.beginPath(); ctx.ellipse(lx - r * 0.2, ly - r * 0.08, r * 0.5, r * 0.07, 0, 0, TAU); ctx.fill();
     };
@@ -463,7 +472,7 @@ function buildAging(){
   // 浮草の追加の葉(元の葉数の約 0.6 倍。成長に応じて先頭から使う)
   floats.forEach(fl => {
     fl.extra = [];
-    for (let j = 0, n = Math.round(fl.leaves.length * 0.6); j < n; j++) fl.extra.push([(r() - 0.5) * 64 * U, (7 + r() * 6) * U, mix("#5d9e3c", "#9fd062", r())]);
+    for (let j = 0, n = Math.round(fl.leaves.length * 0.6); j < n; j++) fl.extra.push([(r() - 0.5) * 64 * U, (7 + r() * 6) * U, lt(mix("#5d9e3c", "#9fd062", r()), 0.1)]);
   });
   // アマゾンソードの葉の縁の苔の点(しきい値 th が algaeHard 未満のものを描く)
   plants.mid.forEach(p => {

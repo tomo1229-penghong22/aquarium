@@ -74,7 +74,9 @@ const sandbox = {
 };
 // モックをグローバルに置いてから、エントリ(js/main.js)を読み込む。読み込み=起動。
 for (const [k, v] of Object.entries(sandbox)) Object.defineProperty(globalThis, k, { value: v, writable: true, configurable: true, enumerable: true });
-const imp = name => import(pathToFileURL(join(root, "js", name)).href);
+// AQUARIUM_JS_ROOT:別の版(変更前のコミットを取り出したディレクトリ)の js/ を対象にして、R-C の数値だけを並べるための口(ふだんは未設定)
+const JSROOT = process.env.AQUARIUM_JS_ROOT || root;
+const imp = name => import(pathToFileURL(join(JSROOT, "js", name)).href);
 await imp("main.js");
 const [core, sp, beh, pop, ui] = await Promise.all([imp("core.js"), imp("species.js"), imp("fish-behavior.js"), imp("popup.js"), imp("ui.js")]);
 const scene = await imp("scene.js");
@@ -193,7 +195,7 @@ for (const sp of A.ORDER) {
     for (const f of A.fishes) {
       if (!A.SPECIES[f.sp].solo) continue;
       const p = cr.crawlerPos(f); if (!p) continue; n++;
-      const ok = Number.isFinite(p.x) && Number.isFinite(p.y) && p.x >= 0 && p.x <= core.W && p.y >= core.waterTop && p.y <= (core.sandY(p.x) + 30 * core.U + 1);
+      const ok = Number.isFinite(p.x) && Number.isFinite(p.y) && p.x >= 0 && p.x <= core.W && p.y >= core.waterTop && p.y <= (f.sp === "snail" ? core.H : core.sandY(p.x) + 30 * core.U + 1); // 貝は砂の手前の縁(前面ガラスとの境目。画面の下端)まで来る(R2)
       if (!ok && !bad) bad = `${f.sp} ${p.surf} (${p.x.toFixed(1)}, ${p.y.toFixed(1)}) 水面 ${core.waterTop.toFixed(1)} 砂 ${core.sandY(p.x).toFixed(1)}`;
     }
     return { bad, n };
@@ -210,11 +212,85 @@ for (const sp of A.ORDER) {
   for (const k of NEW) A.counts[k] = A.SPECIES[k].max;
   A.syncFish();
   const kinds = new Set(); let badAll = null, nSeen = 0;
+  /* R-C(重なり・動き・浮き・フェード・瞬間移動)の計測を、同じ 2 分間のシミュレーションの中で行う(変更前の版でも同じ計測ができるよう、共通の API だけを使う) */
+  const rad = f => { const c = f.cr, L = A.SPECIES[f.sp].len * core.U * f.scale; return f.sp === "snail" ? L * (c.surf === "gF" || c.tl > 0 ? 0.72 : 0.45) : f.sp === "oto" ? 0.5 * L * (c.surf === "gB" ? 0.8 : c.surf === "gF" ? 1.1 : 1) : 0.5 * L; };
+  const keyOf = c => c.surf === "rock" || c.surf === "wood" ? c.surf + c.id : c.surf;
+  const solo = () => A.fishes.filter(f => A.SPECIES[f.sp].solo && f.cr);
+  const RC = { overlapSec: 0, sameSurfPairSec: 0, minFade: 1, maxJump: 0, maxJumpWho: "", path: new Map(), last: new Map(), maxGap: { rock: 0, wood: 0 }, gapWho: {}, sandOut: 0, maxPairD: 0 };
+  // 岩・流木の描かれている輪郭(drawRock / drawWood と同じ式を、ここで独立に計算する)
+  const rockPoly = r => { const out = [[r.pts[0][0], r.pts[0][1]]]; let cx = r.pts[0][0], cy = r.pts[0][1]; for (let i = 1; i < r.pts.length; i++) { const a = r.pts[i - 1], b = r.pts[i], mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2; for (let k = 1; k <= 12; k++) { const t = k / 12, u = 1 - t; out.push([u * u * cx + 2 * u * t * a[0] + t * t * mx, u * u * cy + 2 * u * t * a[1] + t * t * my]); } cx = mx; cy = my; } out.push(out[0]); return out; };
+  const woodPoly = br => { const n = br.length, L = [], R = []; for (let i = 0; i < n; i++) { const a = i < n - 1 ? Math.atan2(br[i + 1][1] - br[i][1], br[i + 1][0] - br[i][0]) : Math.atan2(br[i][1] - br[i - 1][1], br[i][0] - br[i - 1][0]); const nx = -Math.sin(a), ny = Math.cos(a), w = br[i][2] / 2; L.push([br[i][0] + nx * w, br[i][1] + ny * w]); R.push([br[i][0] - nx * w, br[i][1] - ny * w]); } return [L, R.reverse()]; };
+  const segD = (px, py, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy) / l2)); return Math.hypot(px - (a[0] + dx * t), py - (a[1] + dy * t)); };
+  const polyD = (px, py, pts) => { let m = Infinity; for (let i = 1; i < pts.length; i++) m = Math.min(m, segD(px, py, pts[i - 1], pts[i])); return m; };
+  const wood = scene.getWood ? scene.getWood() : [];
+  const gapOf = f => { // 接地点と、描かれている輪郭(岩・流木)との距離。砂は、砂の面(sandY〜画面の下端)の内側かどうか
+    const k = cr.contactOf ? cr.contactOf(f) : null; if (!k || k.trans) return null;
+    if (k.surf === "rock") return polyD(k.x, k.y, rockPoly(scene.rocks[Math.min(k.id, scene.rocks.length - 1)]));
+    if (k.surf === "wood") { const [L, R] = woodPoly(wood[Math.min(k.id, wood.length - 1)]); return Math.min(polyD(k.x, k.y, L), polyD(k.x, k.y, R)); }
+    return null;
+  };
   for (let i = 0; i < 60 * 120; i++) { // 2 分(60fps)
     frames(1);
-    if (i % 20 === 0) { const b = bounds(); nSeen = Math.max(nSeen, b.n); if (b.bad && !badAll) badAll = b.bad; A.fishes.forEach(f => { if (A.SPECIES[f.sp].solo && f.cr) kinds.add(f.sp + ":" + cr.crawlerPos(f).surf); }); }
+    const list = solo();
+    for (const f of list) { // 瞬間移動の検査(跳躍・泳ぎは除く)・フェードの有無
+      const p = cr.crawlerPos(f), key = f, last = RC.last.get(key), c = f.cr;
+      RC.minFade = Math.min(RC.minFade, c.fade ?? 1);
+      if (last && c.st !== "hop" && last.st !== "hop" && c.st !== "swim" && last.st !== "swim") { const j = Math.hypot(p.x - last.x, p.y - last.y); if (j > RC.maxJump) { RC.maxJump = j; RC.maxJumpWho = `${f.sp} ${last.surf}→${p.surf} ${last.st}→${c.st}`; } }
+      RC.last.set(key, { x: p.x, y: p.y, st: c.st, surf: p.surf });
+      if (i % 6 === 0) { const lp = RC.path.get(f); RC.path.set(f, { x: p.x, y: p.y, len: (lp ? lp.len + Math.hypot(p.x - lp.x, p.y - lp.y) : 0) }); }
+    }
+    if (i % 6 === 0) { // 0.1 秒ごと:同じ面の個体どうしの重なり(中心距離 < 半径の和 × 0.8)の延べ時間(ペア × 秒)
+      for (let a = 0; a < list.length; a++) for (let b = a + 1; b < list.length; b++) {
+        const A1 = list[a], B1 = list[b], ca = A1.cr, cb = B1.cr;
+        if (ca.st === "hop" || cb.st === "hop" || ca.st === "swim" || cb.st === "swim" || keyOf(ca) !== keyOf(cb)) continue;
+        const pa = cr.crawlerPos(A1), pb = cr.crawlerPos(B1), d = Math.hypot(pa.x - pb.x, pa.y - pb.y), r = rad(A1) + rad(B1);
+        RC.sameSurfPairSec += 0.1; if (d < 0.8 * r) RC.overlapSec += 0.1;
+      }
+    }
+    if (i % 20 === 0) {
+      const b = bounds(); nSeen = Math.max(nSeen, b.n); if (b.bad && !badAll) badAll = b.bad; list.forEach(f => kinds.add(f.sp + ":" + cr.crawlerPos(f).surf));
+      for (const f of list) { const g = gapOf(f); if (g !== null) { const k = f.cr.surf; if (g > RC.maxGap[k]) { RC.maxGap[k] = g; RC.gapWho[k] = `${f.sp} id${f.cr.id}`; } } }
+    }
   }
-  check("お掃除生体(全種最大数)の位置が 2 分間つねに水槽の中(水面より下・砂の下端より上・横は水槽内)", !badAll && nSeen === 40 && finite(), badAll || `${nSeen} 匹 / 面 ${[...kinds].sort().join(" ")}`);
+  { // R-C:重なり・詰まり・フェード・瞬間移動・浮き
+    const U1 = core.U, list = solo(), bySp = {};
+    for (const f of list) { const l = RC.path.get(f)?.len ?? 0; (bySp[f.sp] ??= []).push(l / U1); }
+    const need = { snail: 0.05 * 4 * 120, shrimp: 0.05 * 22 * 120, oto: 0.05 * 26 * 120 }; // 2 分間に動く距離(U)の下限 = 種の速さ × 120 秒 × 5%
+    const mins = Object.fromEntries(Object.entries(bySp).map(([k, v]) => [k, Math.min(...v)]));
+    check(`R-C:同じ面のお掃除生体どうしの重なり(中心距離 < 半径の和の 0.8 倍)の延べ時間(最大数・2 分):${RC.overlapSec.toFixed(1)} 秒(同じ面にいた延べ ${RC.sameSurfPairSec.toFixed(0)} 秒)`, true, "変更前の版と並べる(報告)");
+    check("R-C:重なりの延べ時間が、同じ面にいた延べ時間の 0.5% 以下(変更前は 10% 以下が目標の基準)", RC.overlapSec <= 0.005 * Math.max(RC.sameSurfPairSec, 1) + 1e-9, `${RC.overlapSec.toFixed(1)} / ${RC.sameSurfPairSec.toFixed(0)} 秒`);
+    check("R-C:詰まって動けなくなる個体がない(2 分間の移動距離が、種の速さ × 120 秒 × 5% 以上:貝 24U・エビ 132U・オト 156U)", Object.entries(need).every(([k, n]) => mins[k] >= n), Object.entries(mins).map(([k, v]) => `${k} 最小 ${v.toFixed(0)}U(基準 ${need[k].toFixed(0)}U)`).join(" / "));
+    check("R-C:貝のフェード(fade < 1)が一度も起きない", RC.minFade === 1, `最小 ${RC.minFade}`);
+    check("R-C:瞬間移動しない(跳躍・泳ぎ以外の 1 フレームの移動が 3U 以下)", RC.maxJump <= 3 * U1, `最大 ${(RC.maxJump / U1).toFixed(2)}U(${RC.maxJumpWho})`);
+    check("R-C:岩・流木の上の個体が、描かれている輪郭から浮かない・めり込まない(接地点と輪郭の距離 ≤ 1.5U)", RC.maxGap.rock <= 1.5 * U1 && RC.maxGap.wood <= 1.5 * U1, `岩 最大 ${(RC.maxGap.rock / U1).toFixed(2)}U(${RC.gapWho.rock || "-"}) / 流木 最大 ${(RC.maxGap.wood / U1).toFixed(2)}U(${RC.gapWho.wood || "-"})`);
+  }
+  if (cr.contactOf) { // 貝の前面ガラスへの往復(砂の手前の縁→ガラスを這い上がる→苔の帯→這い降りる→縁→砂へ戻る):描画なしで 15 分ぶん(dt 0.05)進める。全員が重ならないことも確かめる
+    const CR = cr.CRAWL, P0 = CR.snailGlassP; CR.snailGlassP = 1;
+    const snails = A.fishes.filter(f => f.sp === "snail" && f.cr), seen = new Map(), cyc = new Map(); let jump = 0, who = "", ov = 0, pair = 0, fade = 1, tlJump = 0, errT = null; const offend = {};
+    const lastP = new Map(), lastTl = new Map();
+    try {
+      for (let i = 0; i < 18000; i++) {
+        for (const f of A.fishes) if (A.SPECIES[f.sp].solo) cr.updateCrawler(f, 0.05);
+        const list = solo();
+        for (const f of snails) {
+          const c = f.cr, p = cr.crawlerPos(f), lp = lastP.get(f), st = (seen.get(f) ?? new Set()); st.add(c.st); seen.set(f, st); fade = Math.min(fade, c.fade ?? 1);
+          if (lp) { const j = Math.hypot(p.x - lp.x, p.y - lp.y); if (j > jump) { jump = j; who = `${lp.st}→${c.st}`; } }
+          lastP.set(f, { x: p.x, y: p.y, st: c.st });
+          const ltl = lastTl.get(f); if (ltl !== undefined) tlJump = Math.max(tlJump, Math.abs((c.tl || 0) - ltl)); lastTl.set(f, c.tl || 0);
+          const seq = cyc.get(f) ?? []; if (seq[seq.length - 1] !== c.st) { seq.push(c.st); cyc.set(f, seq); }
+        }
+        if (i % 2 === 0) for (let a = 0; a < list.length; a++) for (let b = a + 1; b < list.length; b++) {
+          const ca = list[a].cr, cb = list[b].cr; if (ca.st === "hop" || cb.st === "hop" || ca.st === "swim" || cb.st === "swim" || keyOf(ca) !== keyOf(cb)) continue;
+          const pa = cr.crawlerPos(list[a]), pb = cr.crawlerPos(list[b]); pair += 0.1; if (Math.hypot(pa.x - pb.x, pa.y - pb.y) < 0.8 * (rad(list[a]) + rad(list[b]))) { ov += 0.1; const k = `${list[a].sp}:${ca.st}@${keyOf(ca)} × ${list[b].sp}:${cb.st}`; offend[k] = (offend[k] || 0) + 0.1; if (!offend.__s) offend.__s = JSON.stringify({ k, ta: [ca.s, ca.dir, ca.pause, ca.x, ca.y], tb: [cb.s, cb.dir, cb.pause, cb.x, cb.y], ra: rad(list[a]), rb: rad(list[b]), d: Math.hypot(pa.x - pb.x, pa.y - pb.y), i }); }
+        }
+      }
+    } catch (e) { errT = e; } finally { CR.snailGlassP = P0; }
+    const need = ["toEdge", "tilt", "climb", "glass", "descend", "untilt", "return"];
+    const full = [...cyc.values()].filter(q => { const t = q.join(">"); return need.every(n => q.includes(n)) && q.indexOf("toEdge") < q.indexOf("tilt") && q.indexOf("tilt") < q.indexOf("climb") && q.indexOf("climb") < q.indexOf("glass") && q.indexOf("glass") < q.indexOf("descend") && q.indexOf("descend") < q.indexOf("untilt") && q.indexOf("untilt") < q.indexOf("return"); }).length;
+    check("R2:貝が砂の手前の縁から前面ガラスを這い上がり、苔の帯を這って、這い降りて砂へ戻る(15 分、確率 1。一巡した貝の数)", !errT && full >= 2, errT ? String(errT.stack || errT) : `${full} / ${snails.length} 匹が一巡(各貝の状態の推移 ${[...cyc.values()].map(q => q.length + ":" + q.slice(0, 14).join(">")).join(" | ")})`);
+    check("R2:貝の移動に瞬間移動・フェードがない(15 分:1 ステップ 0.05 秒の移動の最大、フェード、縁での変形の連続性)", jump <= 2 * core.U && fade === 1 && tlJump <= 0.05 / CR.snailTilt + 1e-6, `最大 ${(jump / core.U).toFixed(2)}U(${who}) / fade 最小 ${fade} / 変形の 1 ステップの変化 最大 ${tlJump.toFixed(4)}`);
+    check(`R2:15 分(貝が頻繁にガラスへ往復する条件)でも、同じ面の重なりの延べ時間がほぼゼロ:${ov.toFixed(1)} 秒(同じ面の延べ ${pair.toFixed(0)} 秒)`, ov <= 0.005 * Math.max(pair, 1) + 1e-9, `${ov.toFixed(1)} / ${pair.toFixed(0)} 秒 ${Object.entries(offend).filter(([k]) => k !== "__s").sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => k + " " + v.toFixed(1)).join(" ; ")} 初回 ${offend.__s}`);
+  }
   // 水温・照明・全画面サイズ・低酸素で、更新と描画(全レイヤ)が例外なく呼べる
   let err = null;
   const drawAll = () => ["back", "low", "front", "glass"].forEach(l => cr.drawCrawlers(l));
@@ -322,6 +398,36 @@ for (const [sp, acts] of Object.entries(ACTS_NEW)) {
   const s1 = record(mkf("shrimp"), 100), s2 = record(mkf("shrimp"), 100), fa = A.SPECIES.shrimp.finAlpha;
   check("不透明化の監査:ヤマトヌマエビは、メインの描画に 1 枚の drawImage(半透明 finAlpha)だけを出し、共用の同じオフスクリーンから貼る",
     s1.length === 1 && s1[0].op === "drawImage" && Math.abs(s1[0].a - fa) < 1e-9 && s2.length === 1 && s1[0].src === s2[0].src && !!s1[0].src, `${s1.length} 命令(${s1.map(o => o.op)}) alpha ${s1[0]?.a}`);
+  // R1b:岩・流木・水草・浮草は不透明(層の globalAlpha をやめた)。2 つの方法で確かめる:
+  //  (1) main.js の draw() を上から読み、岩・流木・各層の水草・浮草を描く行の時点で ctx.globalAlpha が 1 であること
+  //  (2) 描画関数そのものを記録用のコンテキスト(globalAlpha 1 から)で走らせ、すべての塗り・線の実効アルファが 1 であること(物体自身が半透明にしていない)
+  {
+    const src = readFileSync(join(JSROOT, "js", "main.js"), "utf8"), body = src.slice(src.indexOf("function draw()"), src.indexOf("function loop"));
+    let alpha = 1; const badLines = [];
+    for (const line of body.split("\n")) {
+      for (const m of line.matchAll(/ctx\.globalAlpha = ([^;]+);/g)) alpha = m[1].trim() === "1" ? 1 : m[1].trim();
+      if (/drawWood\(|drawRock|plants\.(back|mid|front)|drawFloats\(/.test(line) && alpha !== 1) badLines.push(`${line.trim()}(globalAlpha = ${alpha})`);
+    }
+    check("不透明化の監査(背景):main.js の draw() で、岩・流木・奥/中景/前景の水草・浮草を描く時点の globalAlpha が 1", badLines.length === 0, badLines[0] || "");
+    const st = { globalAlpha: 1 }, stk = [], ops = [];
+    const rec = new Proxy({}, {
+      get(o, k) {
+        if (k === "save") return () => stk.push({ ...st }); if (k === "restore") return () => { const q = stk.pop(); if (q) Object.assign(st, q); };
+        if (PAINT_OPS.includes(k)) return () => ops.push({ op: k, a: st.globalAlpha });
+        if (/^create/.test(k)) return () => ({ addColorStop() {} });
+        return k in st ? st[k] : () => {};
+      },
+      set(o, k, v) { st[k] = v; return true; },
+    });
+    const orig = core.ctx; core.setCtx(rec);
+    const groups = { 岩: () => scene.rocks.forEach(scene.drawRock), 流木: () => scene.drawWood(), 奥の水草: () => scene.plants.back.forEach(q => q.type === "ribbon" ? scene.drawRibbon(q, 1) : scene.drawStem(q, 1)),
+      中景の草: () => scene.plants.mid.forEach(q => q.type === "fern" ? scene.drawFern(q, 1) : q.type === "lotus" ? scene.drawLotus(q, 1) : scene.drawSword(q, 1)),
+      前景の草: () => scene.plants.front.forEach(q => { if (q.type === "tuft") q.blades.forEach(bl => scene.drawRibbon(bl, 1)); else scene.drawCarpet(q, 1); }), 浮草: () => scene.drawFloats(1) };
+    const badG = []; let nOps = 0;
+    try { for (const [name, fn] of Object.entries(groups)) { ops.length = 0; fn(); nOps += ops.length; if (!ops.length || ops.some(o => o.a !== 1)) badG.push(`${name}(${ops.length} 命令、alpha ${[...new Set(ops.map(o => o.a))]})`); } } finally { core.setCtx(orig); }
+    check("不透明化の監査(背景):岩・流木・水草・浮草の描画関数の塗り・線の実効アルファがすべて 1", badG.length === 0, badG[0] || `${nOps} 命令`);
+  }
+
 }
 
 {

@@ -21,11 +21,10 @@ function draw(){
   if (PERF) perfMark("static");
   drawRays(T);
   if (PERF) perfMark("rays");
-  ctx.globalAlpha = 0.78;
   plants.back.forEach(p => p.type === "ribbon" ? drawRibbon(p, T) : drawStem(p, T));
   if (PERF) perfMark("backPlants");
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = nightT > 0.5 ? "rgba(70,120,140,0.11)" : "rgba(130,200,190,0.1)"; ctx.fillRect(0, waterTop, W, H * 0.82 - waterTop);
+  // 奥の水草は不透明(後ろの草が透けない)。奥行きの淡さは、この霞(水の色の薄い重ね。以前の水草の半透明 0.78 の分を引き受ける)で表す
+  ctx.fillStyle = nightT > 0.5 ? "rgba(70,120,140,0.2)" : "rgba(130,200,190,0.19)"; ctx.fillRect(0, waterTop, W, H * 0.82 - waterTop);
   if (PERF) perfMark("haze");
   drawBubbles();
   if (PERF) perfMark("bubbles");
@@ -34,23 +33,20 @@ function draw(){
   drawCrawlers("back"); // 奥のガラスに吸いついたオト
   if (PERF) perfMark("backFish");
   ctx.fillStyle = "rgba(110,180,175,0.045)"; ctx.fillRect(0, waterTop, W, H * 0.82 - waterTop);
-  ctx.globalAlpha = 0.94; drawWood();
-  ctx.globalAlpha = 0.9; rocks.forEach(drawRock);
+  drawWood();                 // 流木・岩は不透明(層の透明度なし)
+  rocks.forEach(drawRock);
   drawMoss();
   drawAgingHard();
   drawCrawlers("low"); // 岩・砂・流木の上の貝・エビ・オト
-  ctx.globalAlpha = 0.84;
   plants.mid.forEach(p => p.type === "fern" ? drawFern(p, T) : p.type === "lotus" ? drawLotus(p, T) : drawSword(p, T));
   if (PERF) perfMark("midground");
-  ctx.globalAlpha = 1;
+  ctx.fillStyle = nightT > 0.5 ? "rgba(70,120,140,0.07)" : "rgba(130,200,190,0.07)"; ctx.fillRect(0, waterTop, W, H * 0.82 - waterTop); // 中景の草・岩・流木の淡さ(手前の魚の後ろ)
   sorted.forEach(f => { if (f.z >= 0.45) drawFish(f); });
   drawCrawlers("front"); // 移動中のオト
   drawPuffs();           // コリドラスの砂煙
   if (PERF) perfMark("frontFish");
-  ctx.globalAlpha = 0.86;
   plants.front.forEach(p => { if (p.type === "tuft") p.blades.forEach(b => drawRibbon(b, T)); else drawCarpet(p, T); });
   if (PERF) perfMark("frontPlants");
-  ctx.globalAlpha = 0.88;
   drawFloats(T);
   if (PERF) perfMark("floats");
   ctx.globalAlpha = 1;

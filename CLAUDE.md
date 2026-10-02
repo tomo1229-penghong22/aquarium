@@ -49,7 +49,7 @@ package.json          npm test / drawlog / school / release / serve
 - **外部リソースは Google Fonts のみ・ビルドツールなし。** 外部から読み込めるのは Google Fonts(`fonts.googleapis.com` / `fonts.gstatic.com`)だけ。ビルドツールや npm の依存(実行時・開発時とも)は追加しない。JavaScript は素の ES Modules のまま `js/` に置く。
 - **HTTP サーバ経由で開く(`file://` 不可)。** ES Modules は `file://` では読み込めないため、`npm run serve` などの HTTP サーバから `index.html` を開く。
 - **ブラウザストレージは try/catch で囲む。** 保存キーは `aquarium-v1`(内容:`counts`, `T`, `night`, `aging`)。空でも正常に動くこと。
-- **表現の方向性:写実的にしすぎない。** 光と色の調和を重視した、少しイラスト寄りの美しさ。やわらかな半透明感は、ひれ・尾の膜、光、霞、色の調和で保つ。**魚の体は不透明**(実際の魚の体は不透明で、透けるのはひれの膜だけ)。不透明な物体は後ろを透かさず、手前が奥を隠す(描く順は z 順)。例外:ヤマトヌマエビは体が実際に半透明なので、1 匹を 1 枚の半透明の物体として描く。出現・消滅のフェードの間だけは体も透けてよい。
+- **表現の方向性:写実的にしすぎない。** 光と色の調和を重視した、少しイラスト寄りの美しさ。**半透明は個々の物体に掛けるものではなく、映像全体の柔らかさの表現。** 物体(魚の体・貝・岩・流木・水草の葉・浮草)は不透明に描き、全体の色が重くならず澄んだ感じにする(明度を保ち、水の澄んだ色へ寄せる。灰色に濁らせない)。半透明にしてよいのは、物理的に透けるもの(ひれ・尾の膜、ヤマトヌマエビの体、浮草の細い根、光・霞・ガラスの汚れなどの効果)だけ。**半透明が正しいのは、ひれの膜・エビの体・浮草の細い根。**柔らかさと澄んだ感じは、光の筋・コースティクス・水の霞・色調補正・奥行きの色の寄せ方で出す。不透明な物体は後ろを透かさず、手前が奥を隠す(描く順は z 順)。ヤマトヌマエビは 1 匹を 1 枚の半透明の物体として描く(脚・節の重なりで濃くならない)。出現・消滅のフェードの間だけは体も透けてよい。
 - **水温の範囲は 18〜34℃。** 下端は「少し冷たすぎる」、上端は「放っておくとひどく弱る」温度。体調モデルの挙動は `docs/SPEC.md` の数値を基準にする。
 - **科学的に妥当な説明。** 水温と酸素、代謝の関係など、UI に出す説明は根拠のある内容にする。
 - **アクセシビリティ。** ボタンには `aria-label`、キーボード操作(Tab / Esc / F)を維持する。
@@ -65,7 +65,7 @@ package.json          npm test / drawlog / school / release / serve
 | `js/aging.js` | 時間経過の状態 | `agingOn`、`dirt` `algaeGlass` `algaeHard` `clog` `growth` `DO` `lastClean` `lastFilter`、`glassAge`(ガラスの苔の実効秒)、`updateAging`(毎フレーム。`env.counts` でお掃除生体の数を受け取り、苔の増える速さの倍率 `glassMult` / `hardMult` を掛ける)、`fishLoadOf`(無脊椎動物は呼吸量 ×0.4)、`checkMaintenance`(メンテ)、`DOsat` `hypoxia`、`sunTimes` `lightPhase`(日の出日没)、保存の登録(`initAging`)、確認用パラメータ(`parseAgingParam`・`applyAgingParam`。`?aging` 中は保存を凍結)。トップレベルで乱数・Canvas・`Date` を使わない |
 | `js/fish-render.js` | 描画ヘルパ | 体・尾・ひれのパス、`shade`(陰影と縁の光)、`eye`、`BASE_A`(ひれの膜の透明度)、`BODY_A`(体の透明度。ふだん 1)、`EYE`、`AUDIT`(テストの監査用フック)、`PAINT`(種ごとの描画関数。エビは共用のオフスクリーンに不透明で描いてから半透明で 1 回貼る。お掃除生体の横向きの姿を含む)、`drawFish`、お掃除生体用の `GROUND`・`drawCreature`・`drawSnailFront` |
 | `js/fish-behavior.js` | 魚の生成 / 体調・行動 | `fishes`、`schools`、`makeFish`、`syncFish`、`baseZone`(種の層を上下に広げる。魚は水槽全体を泳ぐ)、`effectiveZone`、`updateHealth`(DO < 3 で体調低下)、`updateFish`(群れ・分離・壁・温度と低酸素による層の移動。`solo` の種は使わない)。群れる種(ネオン・ラミー)は縦の散らばり 1.0、前後に楕円の分離(1.3)、速度が基準の 10% 未満なら円形の分離。コリドラスの砂つつき(砂煙)もここ |
-| `js/crawlers.js` | お掃除生体の位置・動き | オト・エビ・貝の這える面(砂・岩・流木・前面/奥のガラス)、状態機械 `updateCrawler`、描画の呼び出し `drawCrawlers(layer)`(層は `back` `low` `front` `glass`)、`relayout`(resize 後)、読み取り用の `grazers`(なめた跡の位置)・`crawlerPos`・`glassBand`、数値 `CRAWL`。トップレベルで乱数・Canvas を使わない |
+| `js/crawlers.js` | お掃除生体の位置・動き | オト・エビ・貝の這える面(砂・岩・流木の描かれている輪郭・前面/奥のガラス)、状態機械 `updateCrawler`(同じ面の個体どうしは重ならない=近づく動きをしない・脇へよける・行き先を予約。貝は砂の手前の縁からガラスを這い上がる。瞬間移動・フェードなし)、描画の呼び出し `drawCrawlers(layer)`(層は `back` `low` `front` `glass`)、`relayout`(resize 後)、読み取り用の `grazers`(なめた跡の位置)・`crawlerPos`・`glassBand`、数値 `CRAWL`。トップレベルで乱数・Canvas を使わない |
 | `js/governor.js` | 性能による切り替え | 毎フレームの logic+draw の所要時間(ms)の 3 秒移動平均が 2.5ms を超えたら、なめた跡を約 1 秒かけて消し(`on` → `fading` → `off`)、以後は戻さない。起動・resize・表示復帰の直後 3 秒と hidden の間は判定しない。`GOV.override` はテスト専用。ほかに依存しない |
 | `js/scene.js` | 配置 / 水草の描画 / 光・水面 / 温度計 / 24時間計 / 酸素メーター / ガラスの映り込み / エアストーン・泡・浮遊物 | `buildScene()`(水草・岩・流木・浮草・光の筋などを乱数シード固定で生成)、`makeStatic()`(昼/夜の静的背景)、`spine`(水流で揺れる背骨)と各水草・流木・こけ・浮草の描画、コースティクス・光の筋・水面・玉ボケ(光の素材は `buildLight()` が作り置き。buildScene の最後に呼ばれる)、時間経過の見た目(`buildAging()`・`ensureAging()` がテクスチャを遅延生成、`drawAgingGlass`・`drawAgingHard`。乱数は別シード `AG_SEED`)、なめた跡(`updateTrails`。低解像度の世代マスク+跡あり版の作り置き。見た目だけで苔の状態は変えない)、コリドラスの砂煙(`FX.puff`・`spawnPuff`・`drawPuffs`)、夜の照明、LED、色調補正、温度計、24時間計(`clockHourAngle`・`drawClock`・`clockGeom`。時間経過オフのときはグレー)、酸素メーター(`o2NeedleAngle`・`drawO2Meter`・`meterGeom`。文字盤は `buildMeter()` が作り置き)、泡 |
 | `js/popup.js` | 拡大ポップアップ | 小さな水槽の状態 `P`、行動の状態機械(`startAct` / `updatePop`。お掃除生体は種ごとの仕草 `POOLS`)、描画、開閉 |
@@ -77,12 +77,13 @@ package.json          npm test / drawlog / school / release / serve
 
 ## 変更するときの落とし穴
 
+- **背景の物体(岩・流木・水草・浮草)にも、層ごとの `globalAlpha` をかけない。** 奥行きの淡さは霞の層(`main.js` の `draw()` の水の色の薄い `fillRect`)で出す。`npm test` の監査が確かめる。
 - **`PAINT` の中で、体を半透明にしない。** 体を描く部分は `ctx.globalAlpha = BODY_A`(ふだん 1)、ひれ・尾の膜を描く部分だけ `ctx.globalAlpha = BASE_A`(= `finAlpha` × フェード)にする(`finOn()` / `bodyOn()`。尾は `withTail`、胸びれは `pectoral` が自動で切り替える)。体の色むらは `globalAlpha` ではなく色の `rgba` で重ねる。自分の体の奥にあるひれは、体より先に描いて体で隠す。透明度を 1 や任意の値に決め打ちしない。エビは `paintShrimpParts` の中をすべて不透明に描き、貼るときだけ `BASE_A` を掛ける(脚・節・触角の重なりで濃くならない)。変更したら `npm test`(監査)と `tests/pixels.html`(実ブラウザの画素)で確かめる。
 - **`ctx` と `U` は差し替えて使っている。** パネルのアイコンとポップアップは、`ctx` を別の Canvas に、`U`(長さの単位)を別の値に一時的に差し替えて `PAINT` を呼ぶ。描画関数は、`core.js` から import した素の `ctx` と `U` だけを使うこと(`G.ctx` のような書き換えはしない)。
 - **import した変数へは代入できない。** 共有の変数(`ctx`・`U`・`W`・`H`・`DPR`・`waterTop`・`Tset`・`Tw`・`timeScale`・`nightOn`・`nightT`、`BASE_A`・`EYE`、時間経過の状態の `agingOn`・`dirt`・`algaeGlass`・`algaeHard`・`clog`・`growth`・`DO`・`lastClean`・`lastFilter`)は、所有するモジュールで `export let` とし、書き換えは所有モジュールが export するセッターや関数(`setCtx`・`setU`・`setBaseA`・`setEye`・`setAgingOn`・`resetAging`・`updateAging`・`checkMaintenance` など)で行う。aging の状態を他のモジュールから直接代入しない。読み取りは import した名前をそのまま使う(ライブバインディングなので、差し替え後の値が見える)。
 - **長さは `U` を単位に書く。** `U = min(W/1000, H/625)`。全画面では縦横比が変わる。
 - **`EYE` はポップアップ専用。** 視線とウインクのために `setEye()` で一時的に設定し、描画後に `null` へ戻す。
-- **描画順には意味がある。** 静的背景 → 光の筋 → 奥の水草 → 霞 → 泡 → 奥の魚(直後に奥のガラスのオト)→ 薄い霞 → 流木・岩・こけ・中景の草 → 手前の魚(直後に移動中のオトと砂煙)→ 前景の草 → 浮草 → 粒子 → コースティクス → 水面 → ガラスの汚れ・苔(`drawAgingGlass`)→ 前面ガラスの貝・オト → 色調補正 → LED → 温度計 → 時計 → 酸素メーター → ガラス。流木・岩・こけの直後に岩・流木の苔(`drawAgingHard`)と、岩・砂・流木の上の貝・エビ・オトも入る(中景の草の前)。詳細は `docs/ARCHITECTURE.md`。
+- **描画順には意味がある。** 静的背景 → 光の筋 → 奥の水草 → 霞 → 泡 → 奥の魚(直後に奥のガラスのオト)→ 薄い霞 → 流木・岩・こけ・中景の草 → 霞(中景の草の後)→ 手前の魚(直後に移動中のオトと砂煙)→ 前景の草 → 浮草 → 粒子 → コースティクス → 水面 → ガラスの汚れ・苔(`drawAgingGlass`)→ 前面ガラスの貝・オト → 色調補正 → LED → 温度計 → 時計 → 酸素メーター → ガラス。流木・岩・こけの直後に岩・流木の苔(`drawAgingHard`)と、岩・砂・流木の上の貝・エビ・オトも入る(中景の草の前)。詳細は `docs/ARCHITECTURE.md`。
 - **`resize()` で情景を作り直す。** 配置はシード固定の乱数なので、同じサイズなら同じ配置になる。魚の位置は比率で引き継ぐ。
 - **新しい行動や仕草を足したら、テストの `ACTS` にも追加する。**(`tests/smoke.mjs` と `tests/drawlog.mjs` の両方。お掃除生体の固有の仕草は、種ごとの辞書 `ACTS_NEW` に足す。新種を持たない ORDER のハーネスでは実行されないので、既存の仕草の順・乱数消費は変わらない)
 - **お掃除生体は `fishes` に入るが、`updateFish` と `drawFish` は使わない。** `solo` の種は `crawlers.js` の `updateCrawler` と `drawCrawlers` が担当する。魚の描画ループやパネルの集計に新しい種を足すときは、`solo` の扱いに気をつける。

@@ -23,11 +23,12 @@
 <h1>不透明化の画素確認(R-B)</h1>
 <p>実際のブラウザの Canvas で、魚 6 種・オト・エビ・貝(横向き・前面ガラス)を、赤と緑の 2 通りの背景に描いて画素を比べます。
    <code>npm run serve</code> → <code>http://localhost:8000/tests/pixels.html</code> で開きます(外部リソースなし。<code>js/</code> のモジュールを import するだけ)。</p>
+<p><small>判定条件(R1b):背景の物体(岩・流木・水草・浮草)の判定は、3 倍の解像度で描いて行う。内部 = 周囲 2 画素(5x5)がすべて強く塗られた画素。内部の透けた画素のうち、「すき間」(別々の不透明な図形のあいだの、幅が約 5 画素以下の背景。4 方向のどれかで、同じ距離 1〜3 画素の両側が不透明な本体の画素)は物理的な穴ではないので許容し、すき間でないもの(面状)が 0 であることを判定する。<b>浮草の根</b>(細く淡い組織。rgba(225,215,185,0.55) の細い線)は、ひれの膜と同じ「物理的に透ける部分」として許容し、その線(stroke)を描かずに、葉の本体だけで判定する。種類ごとに(関数ごとに)分けて判定し、透けた画素は図に印で示す(マゼンタ = すき間、橙 = 面状)。</small></p>
 <p><small>背景 赤 = (220,40,40)、緑 = (40,200,40)。画素の差 Δ は 0〜255 の値の差。不透明度の推定値 α = 1 − (赤背景の画素 − 緑背景の画素) / (背景の差)(R と G チャンネルの平均)。
    プローブ(判定する画素)は、PAINT の形から決めた位置で、下の図に印を付けています(青 = 体、マゼンタ = ひれの膜、橙 = エビの重なり、水色 = エビの重ならない体)。</small></p>
 <div id="summary">実行中…</div>
 <table id="res"><thead><tr><th>項目</th><th>判定</th><th>測った値</th></tr></thead><tbody></tbody></table>
-<h2 style="font-size:15px">印つきの図(緑の背景、2 倍表示)</h2>
+<h2 style="font-size:15px">印つきの図(緑の背景。魚・エビ・貝は 2 倍、背景の物体は 1/2 倍)</h2>
 <div class="views" id="views"></div>
 
 <!-- js/core.js が #tank とその親を読み込み時に探すためのもの(表示しない) -->
@@ -37,6 +38,7 @@
 import * as core from "../js/core.js";
 import { drawCreature, drawSnailFront } from "../js/fish-render.js";
 import { SPECIES } from "../js/species.js";
+import * as scene from "../js/scene.js";
 
 /* ---------------- 設定 ---------------- */
 const CW = 340, CH = 200, CX = 190, CY = 100;           // 描く小さなキャンバスと、体の中心
@@ -170,6 +172,136 @@ for (const k of Object.keys(FISH)) {
   add("石巻貝:フェード(a = 0.5)の間は足が半透明(不透明度の推定 0.5 ± 0.05)", Math.abs(a - 0.5) <= 0.05, `推定 ${a.toFixed(3)}`);
 }
 
+/* ---------------- 背景の物体の不透明化(R1b):岩・流木・各層の水草・浮草 ---------------- */
+{
+  const SW = 800, SH = 500;
+  core.setDPR(1); core.setW(SW); core.setH(SH); core.setU(0.8); core.setWaterTop(SH * 0.055);
+  scene.buildScene();
+  const big = (bg, draw, k = 1, wrap = null) => { const c = document.createElement("canvas"); c.width = SW * k; c.height = SH * k; const g = c.getContext("2d", { willReadFrequently: true });
+    g.fillStyle = css(bg); g.fillRect(0, 0, SW * k, SH * k); g.scale(k, k); const orig = core.ctx; core.setCtx(wrap ? wrap(g) : g); try { draw(); } finally { core.setCtx(orig); } return { c, g }; };
+  /* 浮草の根(細く淡い組織。rgba(225,215,185,0.55) の細い線)は、ひれの膜と同じ「物理的に透ける部分」として許容し、判定の対象から外す:
+     この色の線(stroke)の呼び出しだけを無視する Proxy を ctx の代わりに渡して、根を描かずに葉の本体だけを描く */
+  const noRoots = g => new Proxy(g, {
+    get(t, k) { const v = t[k]; if (k === "stroke") return (...a) => { if (/225,\s*215,\s*185/.test(String(t.strokeStyle))) return; return t.stroke(...a); }; return typeof v === "function" ? v.bind(t) : v; },
+    set(t, k, v) { t[k] = v; return true; },
+  });
+  /* 強く塗られた(背景との差 ≥ 60)内部の画素のうち、2 つの背景で差が 2 を超えるもの(= 透けている画素)を数える。
+     内部 = 周囲 2 画素(5x5)がすべて強く塗られた画素(判定の基準。細い部分の縁のアンチエイリアスを除く)。参考に、周囲 1 画素(3x3)の内部での数も出す。
+     細い線(根・葉脈などの効果)は内部に入らない。物体の本体が不透明なら、透ける画素は 0 */
+  const K = 3; // 背景の物体の判定は 3 倍の解像度で行う(細い葉の縁のアンチエイリアスの幅が、解像度に対して相対的に細くなる)
+  const scan = (draw, wrap) => {
+    const SW = 800 * K, SH = 500 * K; // (この関数の中では、画素の数)
+    const R = big(RED, draw, K, wrap), G = big(GREEN, draw, K, wrap), a = R.g.getImageData(0, 0, SW, SH).data, b = G.g.getImageData(0, 0, SW, SH).data;
+    const strong = (d, bg, i) => Math.max(Math.abs(d[i] - bg[0]), Math.abs(d[i + 1] - bg[1]), Math.abs(d[i + 2] - bg[2])) >= 60;
+    const m = new Uint8Array(SW * SH); for (let i = 0; i < SW * SH; i++) m[i] = strong(a, RED, i * 4) && strong(b, GREEN, i * 4) ? 1 : 0;
+    let interior = 0, bad = 0, worst = 0, interior3 = 0, bad3 = 0, worst3 = 0, seam = 0, area = 0, areaWorst = 0; const spots = [], areaSpots = [];
+    const dAt = i => { const k = i * 4; return Math.max(Math.abs(a[k] - b[k]), Math.abs(a[k + 1] - b[k + 1]), Math.abs(a[k + 2] - b[k + 2])); };
+    const opaqueAt = i => m[i] && dAt(i) <= TOL_BODY; // 強く塗られていて、背景に影響されない(不透明な本体の)画素
+    // すき間(2 つの不透明な図形のあいだの、幅が数画素以下の背景):4 つの方向のどれかで、同じ距離(1〜3 画素)の両側が不透明な本体
+    const AXES = [[1, 0], [0, 1], [1, 1], [1, -1]];
+    const isGap = (x, y) => AXES.some(([ax, ay]) => { for (let q = 1; q <= 3; q++) { const i1 = (y + ay * q) * SW + x + ax * q, i2 = (y - ay * q) * SW + x - ax * q; if (i1 > 0 && i2 > 0 && i1 < SW * SH && i2 < SW * SH && opaqueAt(i1) && opaqueAt(i2)) return true; } return false; });
+    for (let y = 2; y < SH - 2; y++) for (let x = 2; x < SW - 2; x++) {
+      const i = y * SW + x; if (!m[i]) continue;
+      let all3 = true, all5 = true;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (!m[i + dy * SW + dx]) { all5 = false; if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) all3 = false; }
+      if (!all3) continue;
+      const k = i * 4, d = Math.max(Math.abs(a[k] - b[k]), Math.abs(a[k + 1] - b[k + 1]), Math.abs(a[k + 2] - b[k + 2]));
+      interior3++; if (d > TOL_BODY) { bad3++; worst3 = Math.max(worst3, d); }
+      if (all5) {
+        interior++;
+        if (d > TOL_BODY) {
+          bad++; worst = Math.max(worst, d);
+          const gap = x > 4 && y > 4 && x < SW - 4 && y < SH - 4 && isGap(x, y);
+          if (gap) seam++; else { area++; areaWorst = Math.max(areaWorst, d); if (areaSpots.length < 400) areaSpots.push([x, y]); }
+          if (spots.length < 800 && (bad % 3 === 1)) spots.push([x, y, gap ? 1 : 0]);
+        }
+      }
+    }
+    return { interior, bad, worst, interior3, bad3, worst3, seam, area, areaWorst, spots, areaSpots, canvas: G.c };
+  };
+  const objs = [
+    ["岩(drawRock)", () => scene.rocks.forEach(scene.drawRock)],
+    ["流木(drawWood)", () => scene.drawWood()],
+    ["奥の水草:バリスネリア(drawRibbon)", () => scene.plants.back.filter(p => p.type === "ribbon").forEach(p => scene.drawRibbon(p, 0))],
+    ["奥の水草:ロタラ(drawStem)", () => scene.plants.back.filter(p => p.type !== "ribbon").forEach(p => scene.drawStem(p, 0))],
+    ["中景の草:シダ(drawFern)", () => scene.plants.mid.filter(p => p.type === "fern").forEach(p => scene.drawFern(p, 0))],
+    ["中景の草:タイガーロータス(drawLotus)", () => scene.plants.mid.filter(p => p.type === "lotus").forEach(p => scene.drawLotus(p, 0))],
+    ["中景の草:アマゾンソード(drawSword)", () => scene.plants.mid.filter(p => p.type === "sword").forEach(p => scene.drawSword(p, 0))],
+    ["前景の草:ヘアーグラス(drawRibbon、平らな葉)", () => scene.plants.front.filter(p => p.type === "tuft").forEach(p => p.blades.forEach(bl => scene.drawRibbon(bl, 0)))],
+    ["前景の草:小さな葉の絨毯(drawCarpet)", () => scene.plants.front.filter(p => p.type !== "tuft").forEach(p => scene.drawCarpet(p, 0))],
+    ["浮草の葉(drawFloats。根の線を除く)", () => scene.drawFloats(0), noRoots],
+  ];
+  for (const [name, draw, wrap] of objs) {
+    const r = scan(draw, wrap);
+    add(`${name}:本体の内部の画素は背景に影響されない(3 倍の解像度・周囲 2 画素の内部で、透けた画素のうち「すき間」でないもの(面状)が 0、差 ≤ ${TOL_BODY}/255。判定した内部の画素 ≥ 30)`, r.interior >= 30 && r.area === 0,
+      `内部 ${r.interior} 画素 / 透けた ${r.bad} 画素 = すき間 ${r.seam} + 面状 ${r.area}(面状の最大差 ${r.areaWorst})。すき間 = 別々の不透明な図形のあいだから背景が見えている所(物理的な穴ではない)`);
+    const sc = document.createElement("canvas"); sc.width = SW / 2; sc.height = SH / 2; const sg = sc.getContext("2d"); sg.drawImage(r.canvas, 0, 0, SW / 2, SH / 2);
+    marks.push({ title: `${name}(緑の背景、1/2 倍。透けた画素の位置:マゼンタ = すき間、橙 = 面状)`, canvas: sc, pts: r.spots.map(([x, y, gp]) => ({ x: x / K, y: y / K, kind: gp ? "fin" : "overlap", label: "" })), plain: true, half: true });
+    (window.__badSpots ??= {})[name] = r.spots.slice(0, 60).map(([x, y, gp]) => [Math.round(x / K), Math.round(y / K), gp ? "すき間" : "面状"]);
+    // 拡大(3 倍の画像から 40x40 画素を切り出して 8 倍):面状を優先して、離れた 3 か所まで。なければ、すき間の例
+    const picks = []; for (const [x, y] of (r.areaSpots.length ? r.areaSpots : r.spots)) { if (picks.every(([px, py]) => Math.hypot(px - x, py - y) > 60)) picks.push([x, y]); if (picks.length >= 3) break; }
+    picks.forEach(([x, y]) => {
+      const cc = document.createElement("canvas"); cc.width = 320; cc.height = 320; const cg = cc.getContext("2d"); cg.imageSmoothingEnabled = false;
+      cg.drawImage(r.canvas, x - 20, y - 20, 40, 40, 0, 0, 320, 320);
+      cg.strokeStyle = "#e0219b"; cg.lineWidth = 2; cg.strokeRect(160 - 4, 160 - 4, 8, 8); // 中心(透けた画素)
+      marks.push({ title: `${name}:透けた画素の拡大(3 倍の画像の ${x},${y} の周り 40x40 画素を 8 倍。中心の枠が対象。${r.areaSpots.length ? "面状" : "すき間"})`, canvas: cc, pts: [], plain: true });
+    });
+  }
+  // 岩・流木の中心の 1 点(差 ≤ 2)
+  { const rk = scene.rocks[0], x = rk.x, y = rk.base - rk.h * 0.45, d = () => scene.drawRock(rk), R = big(RED, d), G = big(GREEN, d);
+    const dd = blockMaxDiff(R.g, G.g, x, y); add("岩:中心付近の画素は背景に影響されない(差 ≤ 2/255)", dd <= TOL_BODY, `差 ${dd}`); }
+  { const br = scene.getWood().reduce((m, b) => b[0][2] > m[0][2] ? b : m), pt = br[2], d = () => scene.drawWood(), R = big(RED, d), G = big(GREEN, d); // いちばん太い枝の根元に近い点(wood の先頭は、再帰で先に積まれた細い子の枝)
+    const dd = blockMaxDiff(R.g, G.g, pt[0], pt[1]); add("流木:枝の中心付近の画素は背景に影響されない(差 ≤ 2/255)", dd <= TOL_BODY, `差 ${dd}`); }
+}
+
+/* ---------------- 水槽全体・背景の物体の明るさと彩度(変更前との比較用の測定。判定ではない) ----------------
+   背景の物体と霞だけを、main.js の draw() と同じ順で描いて(魚・光・ガラスなどは除く)、水の領域の平均の明度 L と彩度 S(HSL)を測る。
+   ?layout=old を付けると、変更前(6599b24 まで)の層の透明度と霞の値(奥 0.78・流木 0.94・岩 0.9・中景 0.84・前景 0.86・浮草 0.88、霞 0.10 / 0.045)で描く。
+   変更前の版との比較手順:6599b24 を別の場所へチェックアウトし、この tests/pixels.html をそこへコピーして ?layout=old で開く(その版の scene.js は色を寄せていないので、変更前の見え方になる) */
+{
+  const layout = new URLSearchParams(location.search).get("layout") === "old" ? "old" : "new";
+  const SW = 800, SH = 500, wt = SH * 0.055, wh = SH * 0.82 - wt;
+  core.setDPR(1); core.setW(SW); core.setH(SH); core.setU(0.8); core.setWaterTop(wt); scene.buildScene();
+  const A = layout === "old" ? { back: 0.78, wood: 0.94, rock: 0.9, mid: 0.84, front: 0.86, float: 0.88, h1: 0.10, h2: 0.045, h3: 0 } : { back: 1, wood: 1, rock: 1, mid: 1, front: 1, float: 1, h1: 0.19, h2: 0.045, h3: 0.07 };
+  const hsl = (r, g, b) => { r /= 255; g /= 255; b /= 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn; return [l, d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1))]; };
+  const mean = (g, x0, y0, w, h, base) => { // base があれば、base と違う画素(その物体が描かれた画素)だけの平均
+    const d = g.getImageData(x0, y0, w, h).data, bd = base ? base.getImageData(x0, y0, w, h).data : null; let L = 0, S = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) { if (bd && Math.abs(d[i] - bd[i]) + Math.abs(d[i + 1] - bd[i + 1]) + Math.abs(d[i + 2] - bd[i + 2]) < 6) continue; const [l, s] = hsl(d[i], d[i + 1], d[i + 2]); L += l; S += s; n++; }
+    return { L: n ? L / n : 0, S: n ? S / n : 0, n };
+  };
+  const mk = () => { const c = document.createElement("canvas"); c.width = SW; c.height = SH; return [c, c.getContext("2d", { willReadFrequently: true })]; };
+  const layers = [
+    ["奥の水草", A.back, () => scene.plants.back.forEach(p => p.type === "ribbon" ? scene.drawRibbon(p, 0) : scene.drawStem(p, 0))],
+    ["流木", A.wood, () => scene.drawWood()],
+    ["岩", A.rock, () => scene.rocks.forEach(scene.drawRock)],
+    ["中景の草", A.mid, () => scene.plants.mid.forEach(p => p.type === "fern" ? scene.drawFern(p, 0) : p.type === "lotus" ? scene.drawLotus(p, 0) : scene.drawSword(p, 0))],
+    ["前景の草", A.front, () => scene.plants.front.forEach(p => { if (p.type === "tuft") p.blades.forEach(bl => scene.drawRibbon(bl, 0)); else scene.drawCarpet(p, 0); })],
+    ["浮草", A.float, () => scene.drawFloats(0)],
+  ];
+  const orig = core.ctx, objs = {};
+  const [bc, bg] = mk(); bg.drawImage(scene.staticLayer, 0, 0, SW, SH);          // 静的な背景(昼)だけ
+  for (const [name, al, fn] of layers) { // 物体ごと:静的背景の上に、その物体だけを(層の透明度つきで)描いたときの、描かれた画素の平均
+    const [c, g] = mk(); g.drawImage(scene.staticLayer, 0, 0, SW, SH); g.globalAlpha = al; core.setCtx(g); try { fn(); } finally { core.setCtx(orig); }
+    objs[name] = mean(g, 0, 0, SW, SH, bg);
+  }
+  const [c, g] = mk(); g.drawImage(scene.staticLayer, 0, 0, SW, SH);            // 全体:main.js の draw() と同じ順(魚・光・ガラスなどは除く)
+  const hz = (a, col) => { g.globalAlpha = 1; g.fillStyle = "rgba(" + col + "," + a + ")"; g.fillRect(0, wt, SW, wh); };
+  core.setCtx(g);
+  try {
+    g.globalAlpha = A.back; layers[0][2](); hz(A.h1, "130,200,190"); hz(A.h2, "110,180,175");
+    g.globalAlpha = A.wood; layers[1][2](); g.globalAlpha = A.rock; layers[2][2](); g.globalAlpha = 1; scene.drawMoss();
+    g.globalAlpha = A.mid; layers[3][2](); g.globalAlpha = 1; if (A.h3) hz(A.h3, "130,200,190");
+    g.globalAlpha = A.front; layers[4][2](); g.globalAlpha = A.float; layers[5][2](); g.globalAlpha = 1;
+  } finally { core.setCtx(orig); }
+  const whole = mean(g, 0, Math.round(wt), SW, Math.round(wh), null);
+  const f2 = v => v.toFixed(3);
+  add("水槽全体(背景・水草・岩・流木・霞。魚などは除く。layout=" + layout + "):水の領域の平均の明度 L と彩度 S(HSL)", true, "L " + f2(whole.L) + " / S " + f2(whole.S));
+  for (const [k, v] of Object.entries(objs)) add("  " + k + "(静的な背景の上に、その物体だけを描いた画素の平均。layout=" + layout + ")", true, "L " + f2(v.L) + " / S " + f2(v.S) + " / " + v.n + " 画素");
+  window.__tankMeasure = { layout, whole, objects: objs, haze: { h1: A.h1, h2: A.h2, h3: A.h3 } };
+  const sc = document.createElement("canvas"); sc.width = SW / 2; sc.height = SH / 2; sc.getContext("2d").drawImage(c, 0, 0, SW / 2, SH / 2);
+  marks.push({ title: "水槽の背景の合成(魚なし。layout=" + layout + "。1/2 倍)", canvas: sc, pts: [], plain: true });
+}
+
 /* ---------------- 表示 ---------------- */
 const tb = document.querySelector("#res tbody");
 results.forEach(r => {
@@ -183,10 +315,13 @@ const views = document.getElementById("views");
 marks.forEach(m => {
   const wrap = document.createElement("div"); wrap.className = "view";
   const cap = document.createElement("b"); cap.textContent = m.title; wrap.appendChild(cap);
-  const c = document.createElement("canvas"); c.width = CW * 2; c.height = CH * 2; c.style.width = `${CW * 2}px`; c.style.height = `${CH * 2}px`;
-  const g = c.getContext("2d"); g.imageSmoothingEnabled = false; g.drawImage(m.canvas, 0, 0, CW * 2, CH * 2);
+  const kz = m.plain ? 1 : 2, cw = m.plain ? m.canvas.width : CW * 2, chh = m.plain ? m.canvas.height : CH * 2;
+  const c = document.createElement("canvas"); c.width = cw; c.height = chh; c.style.width = `${cw}px`; c.style.height = `${chh}px`;
+  const g = c.getContext("2d"); g.imageSmoothingEnabled = false; g.drawImage(m.canvas, 0, 0, cw, chh);
+  const pk = m.half ? 0.5 : 1; // half:印の座標は元の大きさ(800x500)で持っているので、1/2 倍の図に合わせる
   g.font = "10px sans-serif";
   m.pts.forEach(p => {
+    if (m.half) { g.fillStyle = "#e0219b"; g.fillRect(p.x * pk - 2, p.y * pk - 2, 4, 4); return; }
     g.strokeStyle = COL[p.kind] || "#000"; g.lineWidth = 2; g.beginPath(); g.arc(p.x * 2, p.y * 2, 6, 0, Math.PI * 2); g.stroke();
     g.fillStyle = COL[p.kind] || "#000"; g.fillRect(p.x * 2 - 1, p.y * 2 - 1, 2, 2);
   });
@@ -196,7 +331,7 @@ const allOk = results.every(r => r.ok), ng = results.filter(r => !r.ok).length;
 const sum = document.getElementById("summary");
 sum.textContent = allOk ? `全 ${results.length} 項目 ✓` : `${ng} 項目 ✗(全 ${results.length} 項目)`;
 sum.className = allOk ? "ok" : "ng";
-window.__pixels = { done: true, ok: allOk, total: results.length, failed: ng, tolerances: { TOL_BODY, MIN_FIN, TOL_ALPHA, TOL_OVERLAP }, results };
+window.__pixels = { done: true, badSpots: window.__badSpots, tank: window.__tankMeasure, ok: allOk, total: results.length, failed: ng, tolerances: { TOL_BODY, MIN_FIN, TOL_ALPHA, TOL_OVERLAP }, results };
 </script>
 </body>
 </html>

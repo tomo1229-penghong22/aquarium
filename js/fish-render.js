@@ -1,5 +1,5 @@
 // 魚の描画。描画関数は、core.js が export する ctx と U を素の名前で使う。
-import { TAU, U, bottomY, ctx, lerp, nightT, setCtx } from "./core.js";
+import { TAU, U, bottomY, clamp, ctx, lerp, nightT, setCtx } from "./core.js";
 import { GUPPY_COL, PLATY_COL, SPECIES } from "./species.js";
 
 /* ---------------- 描画ヘルパ ---------------- */
@@ -376,6 +376,37 @@ export function drawCreature(f, L, wag, x, y, rot, sx, a = 1){
   BASE_A = SPECIES[f.sp].finAlpha * a; BODY_A = a; ctx.globalAlpha = BODY_A;
   PAINT[f.sp](L, wag, f);
   ctx.restore(); BASE_A = 1; BODY_A = 1;
+}
+/* 砂の手前の縁(前面ガラスとの境目)で、横向きの姿(p = 0)と、ガラスの外から見た足の裏の姿(p = 1)の間を、連続して変形させて描く(消えて現れない)。
+   原点は接地点(縁の上の点)。足が平たい楕円から足の裏へ広がり、殻が足の上から足の向こう側(後ろ)へ回り込む。
+   L:横向きの体長(drawCreature と同じ)。足の裏の姿は L の 1.2 倍の大きさ(drawSnailFront と同じ)に合わせる。頭は +x */
+export function paintSnailTilt(L, f, p){
+  const Lf = L * 1.2, rx = 0.56 * Lf, ry = 0.36 * Lf, e = p * p * (3 - 2 * p);
+  const foot = { x: lerp(0.06 * L, 0, e), y: lerp(-0.09 * L, 0, e), rx: lerp(0.5 * L, rx, e), ry: lerp(0.09 * L, ry, e) };
+  const shell = { x: lerp(-0.1 * L, -0.42 * rx, e), y: lerp(-0.41 * L, 0, e), rx: lerp(0.36 * L, 0.66 * rx, e), ry: lerp(0.36 * L, 1.1 * ry, e) };
+  const head = { x: lerp(0.46 * L, 0.8 * rx, e), y: lerp(-0.14 * L, 0, e), rx: lerp(0.12 * L, 0.28 * rx, e), ry: lerp(0.09 * L, 0.55 * ry, e) };
+  const ell = (o, col) => { ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(o.x, o.y, o.rx, o.ry, 0, 0, TAU); ctx.fill(); };
+  const drawShell = () => {
+    ctx.fillStyle = "#3d3a22"; ctx.beginPath(); ctx.ellipse(shell.x, shell.y, shell.rx, shell.ry, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = `rgba(168,152,84,${0.55 * (1 - e)})`; ctx.lineWidth = Math.max(0.8, 1.1 * U);                  // 殻の渦の筋(横向きのときだけ)
+    for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.ellipse(shell.x + shell.rx * 0.1 * k, shell.y, shell.rx * (0.88 - 0.26 * k), shell.ry * (0.88 - 0.26 * k), 0, Math.PI * 0.9, Math.PI * 2.25); ctx.stroke(); }
+    ctx.fillStyle = `rgba(255,250,225,${0.22 * (1 - e)})`; ctx.beginPath(); ctx.ellipse(shell.x - shell.rx * 0.3, shell.y - shell.ry * 0.45, shell.rx * 0.32, shell.ry * 0.13, -0.6, 0, TAU); ctx.fill();
+  };
+  if (p >= 0.5) drawShell();                       // 足の裏を見せるころは、殻は足の向こう側(先に描く)
+  ell(foot, e < 0.5 ? "#cdbd9c" : "#e3d5b8");
+  if (e > 0.3) {                                   // 足の裏の波打つ筋
+    ctx.strokeStyle = `rgba(150,135,105,${0.45 * clamp((e - 0.3) / 0.7, 0, 1)})`; ctx.lineWidth = Math.max(0.6, 0.8 * U);
+    for (let i = 0; i < 6; i++) { const x = foot.x - foot.rx * 0.8 + (i / 6) * foot.rx * 1.25, h = foot.ry * 0.78 * Math.sqrt(Math.max(0, 1 - ((x - foot.x) / foot.rx) ** 2)); ctx.beginPath(); ctx.moveTo(x, foot.y - h); ctx.quadraticCurveTo(x + foot.ry * 0.2, foot.y, x, foot.y + h); ctx.stroke(); }
+  }
+  ell(head, e < 0.5 ? "#bba98a" : "#d8c8aa");
+  if (e > 0.5) { ctx.fillStyle = "#965f54"; ctx.beginPath(); ctx.ellipse(lerp(head.x, 0.92 * rx, e), head.y, 0.1 * rx * e, 0.2 * ry * e, 0, 0, TAU); ctx.fill(); }
+  if (p < 0.5) drawShell();                        // 横向きのころは、殻は足の上(後に描く)
+}
+export function drawSnailTilt(f, L, x, y, sx, p){
+  ctx.save(); ctx.translate(x, y); ctx.scale(sx, 1);
+  ctx.globalAlpha = BODY_A;
+  paintSnailTilt(L, f, p);
+  ctx.restore();
 }
 export function drawSnailFront(f, L, x, y, rot, a = 1){
   ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.globalAlpha = a;
