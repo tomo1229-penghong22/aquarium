@@ -198,6 +198,15 @@ for (const sp of A.ORDER) {
     }
     return { bad, n };
   };
+  { // 前面ガラスの貝・オトの行き先の帯:苔の多い下寄り(中央で下側 40%、隅で 65%)で、砂の上
+    let ok = true, d = "";
+    for (let i = 0; i <= 20; i++) {
+      const x = core.W * (0.05 + 0.9 * i / 20), [y0, y1] = cr.glassBand(x), hg = core.H - core.waterTop, edge = Math.max(0, 1 - Math.min(x / core.W, 1 - x / core.W) / 0.12);
+      const top = core.waterTop + hg * (0.6 - 0.25 * edge);
+      if (!(Math.abs(y0 - top) < 1e-6 && y1 > y0 && y1 <= core.sandY(x) - 7 * core.U)) { ok = false; d = `x=${x.toFixed(0)} ${y0.toFixed(0)}〜${y1.toFixed(0)} 砂 ${core.sandY(x).toFixed(0)}`; }
+    }
+    check("前面ガラスの貝・オトの行き先の帯:中央は下側 40%・隅は下側 65%、下端は砂の少し上(砂の下に出ない)", ok, d);
+  }
   for (const k of NEW) A.counts[k] = A.SPECIES[k].max;
   A.syncFish();
   const kinds = new Set(); let badAll = null, nSeen = 0;
@@ -241,6 +250,32 @@ for (const sp of A.ORDER) {
   check("砂煙:フラグ off では粒が出ず、on ではコリドラスが砂煙の粒を上げる", pOff === 0 && pOn > 0 && scene.FX.puff === true, `off 最大 ${pOff} 粒 / on 最大 ${pOn} 粒`);
   for (const k of A.ORDER) A.counts[k] = save0[k];
   A.syncFish(); frames(30);
+}
+
+// お掃除生体の固有の仕草(drawlog.mjs の ACTS_NEW と同じ)。それぞれの種で 300 フレーム回して例外なし、最後まで終わる(詰まらない)
+const ACTS_NEW = { snail: ["hide", "flip", "glassview"], shrimp: ["wash", "backhop", "hug"], oto: ["graze", "flow", "pakupaku"] };
+for (const [sp, acts] of Object.entries(ACTS_NEW)) {
+  for (const act of acts) {
+    let err = null, endedAt = -1, fin = true, gvMax = 0, eaten = false;
+    try {
+      for (let r = 0; r < 5; r++) { // 乱数の違いで状態が変わるので 5 回
+        A.popReset(sp); A.startAct(act);
+        let i = 0;
+        for (; i < 60 * 12; i++) {
+          A.updatePop(1 / 60); if (i % 5 === 0) A.drawPop();
+          gvMax = Math.max(gvMax, A.P.gv || 0);
+          if (act === "hug" && A.P.food && A.P.food.held) eaten = true;
+          if (!Number.isFinite(A.P.x) || !Number.isFinite(A.P.y)) fin = false;
+          if (!A.P.act) break;
+        }
+        endedAt = Math.max(endedAt, i / 60);
+        for (let k = 0; k < 300; k++) { A.updatePop(1 / 60); if (k % 10 === 0) A.drawPop(); }
+        if (A.P.y > 190 || A.P.y < 0 || A.P.x < -50 || A.P.x > 354) fin = false; // 小さな水槽(304x190)の外へ出ない
+      }
+    } catch (e) { err = e; }
+    check(`新しい仕草が例外なく終わる:${A.SPECIES[sp].name}の「${act}」(5 回。最後まで ${endedAt.toFixed(1)} 秒、位置は小水槽の中)`,
+      !err && fin && endedAt >= 0 && endedAt < 9.5 && (act !== "glassview" || gvMax > 0.9) && (act !== "hug" || eaten), err ? String(err.stack || err) : `gv 最大 ${gvMax.toFixed(2)}`);
+  }
 }
 
 {

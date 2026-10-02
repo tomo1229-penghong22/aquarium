@@ -278,19 +278,25 @@ export const PAINT = {
     ctx.fillStyle = "#1a1d1b"; ctx.beginPath(); ctx.arc(L * 0.4, -L * 0.07, L * 0.02, 0, TAU); ctx.fill(); // 目
     ctx.strokeStyle = "rgba(180,196,180,0.85)"; ctx.fillStyle = "rgba(190,206,190,0.9)"; ctx.lineWidth = Math.max(0.7, 0.9 * U); // 前脚(はさみ)
     for (const d of [0, 1]) {
-      const a = 0.35 + Math.sin(ct * 13 + d * 2.4) * 0.55 * pick + (1 - pick) * 0.1, bx = L * 0.4, by = L * 0.07;
+      let a = 0.35 + Math.sin(ct * 13 + d * 2.4) * 0.55 * pick + (1 - pick) * 0.1, bx = L * 0.4, by = L * 0.07;
+      const wash = f.wash || 0, hold = f.hold || 0;
+      if (wash > 0) a = lerp(a, -0.95 + Math.sin(ct * 17 + d * 2.4) * 0.3, wash);   // 顔を洗う:はさみを目のあたりへ上げ、こすり合わせる
+      if (hold > 0) a = lerp(a, 0.55 + d * 0.5 + Math.sin(ct * 20 + d) * 0.08, hold); // 餌を両手で抱える
       const mx = bx + Math.cos(a) * L * 0.1, my = by + Math.sin(a) * L * 0.1, ex = mx + Math.cos(a * 0.4) * L * 0.09, ey = my + Math.sin(a) * L * 0.06;
       ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(mx, my); ctx.lineTo(ex, ey); ctx.stroke();
       ctx.beginPath(); ctx.arc(ex, ey, L * 0.022, 0, TAU); ctx.fill();
     }
   },
   snail(L, wag, f){
-    const R = L * 0.36, cx = -L * 0.1, cy = -L * 0.12;
-    ctx.fillStyle = "#cdbd9c"; ctx.beginPath(); ctx.ellipse(L * 0.06, L * 0.2, L * 0.5, L * 0.09, 0, 0, TAU); ctx.fill();   // 足
-    ctx.fillStyle = "#bba98a"; ctx.beginPath(); ctx.ellipse(L * 0.46, L * 0.15, L * 0.12, L * 0.09, 0, 0, TAU); ctx.fill();  // 頭
-    ctx.strokeStyle = "#8f8266"; ctx.lineWidth = Math.max(0.7, 0.9 * U); ctx.lineCap = "round";
-    const sway = Math.sin(f.phase * 0.7) * L * 0.02;
-    ctx.beginPath(); ctx.moveTo(L * 0.52, L * 0.1); ctx.lineTo(L * 0.62, L * 0.02 + sway); ctx.moveTo(L * 0.5, L * 0.09); ctx.lineTo(L * 0.57, L * 0.0 - sway); ctx.stroke();
+    const hide = f.hide || 0;                                   // 0〜1:殻へ引っこむ度合い(ポップアップの仕草)。足は縮み、殻は地面へ下がる
+    const R = L * 0.36, cx = -L * 0.1, cy = -L * 0.12 + hide * L * 0.1;
+    ctx.fillStyle = "#cdbd9c"; ctx.beginPath(); ctx.ellipse(L * 0.06 - hide * L * 0.16, L * 0.2, L * 0.5 * (1 - hide * 0.7), L * 0.09 * (1 - hide * 0.35), 0, 0, TAU); ctx.fill();   // 足
+    if (hide < 0.5) {
+      ctx.fillStyle = "#bba98a"; ctx.beginPath(); ctx.ellipse(L * 0.46 - hide * L * 0.3, L * 0.15, L * 0.12, L * 0.09, 0, 0, TAU); ctx.fill();  // 頭
+      ctx.strokeStyle = "#8f8266"; ctx.lineWidth = Math.max(0.7, 0.9 * U); ctx.lineCap = "round";
+      const sway = Math.sin(f.phase * 0.7) * L * 0.02, k = 1 - hide * 2;
+      ctx.beginPath(); ctx.moveTo(L * 0.52, L * 0.1); ctx.lineTo(L * (0.52 + 0.1 * k), L * (0.1 - 0.08 * k) + sway); ctx.moveTo(L * 0.5, L * 0.09); ctx.lineTo(L * (0.5 + 0.07 * k), L * (0.09 - 0.09 * k) - sway); ctx.stroke();
+    }
     ctx.fillStyle = "#3d3a22"; ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.fill();                                      // 殻
     ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.clip();
     ctx.strokeStyle = "rgba(168,152,84,0.55)"; ctx.lineWidth = Math.max(0.8, 1.1 * U);

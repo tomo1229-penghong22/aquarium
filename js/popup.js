@@ -1,7 +1,7 @@
 // 魚アイコンにマウスを重ねたときの拡大ポップアップ(小さな水槽と仕草の状態機械)。
 import { TAU, U, clamp, ctx, lerp, mix, nightT, setCtx, setU } from "./core.js";
 import { NOTES, POP_L, SPECIES } from "./species.js";
-import { BASE_A, PAINT, setBaseA, setEye } from "./fish-render.js";
+import { BASE_A, GROUND, PAINT, drawSnailFront, setBaseA, setEye } from "./fish-render.js";
 
 /* ---------------- 拡大ポップアップ ---------------- */
 const PW = 304, PH = 190;
@@ -15,13 +15,22 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 const pulse = (t, s, d) => (t >= s && t <= s + d) ? Math.sin(Math.PI * (t - s) / d) : 0;
 const popFloor = x => PH * 0.87 + Math.sin(x * 0.03) * 2;
 
+/* お掃除生体(貝・エビは底を這う/歩く、オトは水中で吸いつく・短く泳ぐ)。種ごとの仕草の候補(重みつき)は魚用とは別 */
+const CRAWL = { snail: 1, shrimp: 1, oto: 1 };
+const POOLS = {
+  snail: [["drift", 3], ["hide", 2], ["flip", 1.4], ["glassview", 1.6]],
+  shrimp: [["drift", 3], ["wash", 2.2], ["backhop", 1.6], ["hug", 2.4]],
+  oto: [["drift", 3], ["turn", 2], ["graze", 3], ["flow", 2], ["pakupaku", 2]],
+};
+const floorY = (sp, x) => popFloor(x) - P.L * GROUND[sp] + 2;
 function popBounds(){
   const L = P.L, sp = P.sp;
-  const mx = sp === "guppy" ? L * 1.15 : L * 0.72;
+  const mx = sp === "guppy" ? L * 1.15 : CRAWL[sp] ? L * 0.5 : L * 0.72;
   const xr = [mx, PW - mx];
   let yr = [PH * 0.38, PH * 0.6];
   if (sp === "angel") yr = [PH * 0.47, PH * 0.52];
   if (sp === "cory") yr = [popFloor(PW / 2) - L * 0.2, popFloor(PW / 2) - L * 0.2];
+  if (sp === "shrimp" || sp === "snail") yr = [floorY(sp, PW / 2), floorY(sp, PW / 2)];
   return { xr, yr };
 }
 function popWander(){ const b = popBounds(); P.tx = rnd(b.xr[0], b.xr[1]); P.ty = rnd(b.yr[0], b.yr[1]); P.wanderT = rnd(2.5, 5); }
@@ -32,7 +41,8 @@ export function popReset(sp){
   const spots = []; for (let i = 0; i < 7; i++) spots.push([0.35 + Math.random() * 0.55, (Math.random() - 0.5) * 0.7, 0.5 + Math.random()]);
   let variant = Math.floor(Math.random() * S.variants);
   if (sp === "angel") variant = Math.random() < 0.3 ? 1 : 0;
-  P.f = { phase: Math.random() * TAU, pale: 0, health: 1, spots, variant, ox: Math.random(), tailScale: 1 };
+  P.f = { phase: Math.random() * TAU, pale: 0, health: 1, spots, variant, ox: Math.random(), tailScale: 1, hide: 0, wash: 0, hold: 0, pick: 0, clawT: 0 };
+  P.gv = 0; P.gx = PW / 2; P.gy = PH * 0.45; P.gdir = 1;
   const b = popBounds();
   P.x = PW / 2; P.y = (b.yr[0] + b.yr[1]) / 2; P.vx = 0; P.vy = 0;
   P.flip = P.tflip = Math.random() < 0.5 ? 1 : -1;
@@ -42,8 +52,8 @@ export function popReset(sp){
   popWander();
 }
 function pickAct(){
-  const pool = [["turn", 3], ["drift", 2.5], ["food", 2], ["bubble", 2], ["wiggle", 1.3], ["spin", 1], ["startle", 1], ["peek", 1.2]];
-  ({ neon: [["dash", 2.2]], rummy: [["dash", 2.2]], guppy: [["showoff", 2.6]], platy: [["food", 2]], angel: [["bow", 2.4]], cory: [["wink", 3], ["nibble", 3]] })[P.sp]?.forEach(a => pool.push(a));
+  const pool = POOLS[P.sp] ? POOLS[P.sp].slice() : [["turn", 3], ["drift", 2.5], ["food", 2], ["bubble", 2], ["wiggle", 1.3], ["spin", 1], ["startle", 1], ["peek", 1.2]];
+  if (!POOLS[P.sp]) ({ neon: [["dash", 2.2]], rummy: [["dash", 2.2]], guppy: [["showoff", 2.6]], platy: [["food", 2]], angel: [["bow", 2.4]], cory: [["wink", 3], ["nibble", 3]] })[P.sp]?.forEach(a => pool.push(a));
   const list = pool.filter(a => !(P.sp === "angel" && a[0] === "spin") && a[0] !== P.lastAct);
   let sum = list.reduce((s, a) => s + a[1], 0), r = Math.random() * sum;
   for (const a of list) { r -= a[1]; if (r <= 0) return a[0]; }
@@ -65,14 +75,19 @@ export function startAct(name){
   if (name === "wiggle" && Math.random() < 0.6) popText("ぷるぷる", P.x, P.y - L * 0.32);
   if (name === "dash") { P.d.n = 0; P.d.next = 0; }
   if (name === "nibble") { P.ty = popFloor(P.x) - L * 0.12; }
+  if (name === "hide") popText("!", P.x, P.y - L * 0.5);
+  if (name === "glassview") { P.gx = clamp(P.x, 70, PW - 70); P.gy = PH * 0.46; P.gdir = P.x < PW / 2 ? 1 : -1; popText("ぺたぺた", P.gx, P.gy - 40); }
+  if (name === "hug") { const tw = P.x < PW / 2 ? 1 : -1; P.food = { x: tw > 0 ? rnd(PW * 0.55, PW * 0.94) : rnd(PW * 0.06, PW * 0.45), y: popFloor(PW * 0.5) - 3, vy: 0, k: Math.random() * 9, held: false, s: 1 }; } // 体の前(足 0.55L)で拾える範囲に置く
+  if (name === "backhop") { P.d.x0 = P.x; P.d.dir = dir; P.lockFlip = 99; P.tflip = dir; }
 }
-function endAct(){ P.act = null; P.nextAct = rnd(3.2, 6.5); P.lockFlip = 0; P.spin = 0; P.f.tailScale = 1; popWander(); }
+function endAct(){ P.f.hide = 0; P.f.wash = 0; P.f.hold = 0; P.f.pick = 0; P.act = null; P.nextAct = rnd(3.2, 6.5); P.lockFlip = 0; P.spin = 0; P.f.tailScale = 1; popWander(); }
 
 export function updatePop(dt){
   const S = SPECIES[P.sp], L = P.L, b = popBounds();
   const dir = P.flip >= 0 ? 1 : -1;
   const mouthX = () => P.x + (P.flip >= 0 ? 1 : -1) * L * 0.5 * Math.max(0.3, Math.abs(P.flip));
-  let speedMax = 70, accel = 2.4, wagMul = 1, wagSpeed = 1, holdPitch = null;
+  let speedMax = P.sp === "snail" ? 9 : P.sp === "shrimp" ? 34 : P.sp === "oto" ? 55 : 70, accel = 2.4, wagMul = 1, wagSpeed = 1, holdPitch = null;
+  const fl = P.sp === "snail" || P.sp === "shrimp" ? floorY(P.sp, P.x) : 0; // 底を這う種の、いまの x での体の中心の高さ
   P.t += dt; P.shake = 0;
   if (P.act) {
     P.actT += dt;
@@ -146,6 +161,98 @@ export function updatePop(dt){
         if (t > 1.5) { P.roll = 0; endAct(); }
         break;
       }
+      /* ---- 貝 ---- */
+      case "hide": { // 驚いて殻に引っこみ、しばらくしてそ〜っと顔を出す
+        P.tx = P.x; P.ty = fl; speedMax = 0;
+        P.f.hide = clamp(t < 0.25 ? t / 0.25 : t < 2.3 ? 1 : 1 - (t - 2.3) / 0.7, 0, 1);
+        P.shake = t < 0.3 ? Math.sin(t * 70) * 1.3 : 0;
+        if (t > 2.3 && !P.d.said) { P.d.said = true; popText("そ〜っ", P.x, P.y - L * 0.5); }
+        if (t > 3.1) endAct();
+        break;
+      }
+      case "flip": { // ひっくり返ってじたばたし、よいしょと起き上がる
+        const e = k => k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+        P.tx = P.x; speedMax = 140; wagSpeed = 4;
+        if (t < 0.5) { const k = e(clamp(t / 0.5, 0, 1)); P.spin = k * Math.PI; if (t > 0.3 && !P.d.a) { P.d.a = 1; popText("ころん", P.x, P.y - L * 0.5); } }
+        else if (t < 2.9) { const k = (t - 0.5) / 2.4; P.spin = Math.PI + Math.sin(t * 10) * 0.32 * (1 - k); P.f.phase += dt * 6; if (!P.d.b) { P.d.b = 1; popText("じたばた", P.x, P.y - L * 0.55); } }
+        else if (t < 3.6) { P.spin = Math.PI * (1 - e(clamp((t - 2.9) / 0.7, 0, 1))); if (!P.d.c) { P.d.c = 1; popText("よいしょ", P.x, P.y - L * 0.55); } }
+        else { P.spin = 0; P.squash = 1; endAct(); break; }
+        P.ty = popFloor(P.x) - L * lerp(GROUND.snail, 0.44, clamp(P.spin / Math.PI, 0, 1)) + 2;
+        break;
+      }
+      case "glassview": { // 前面ガラスに移って、足の裏と口を見せながら横へ這う(P.gv でクロスフェード)
+        P.tx = P.x; P.ty = fl; speedMax = 0;
+        P.gx += P.gdir * 16 * dt; P.gy += (PH * 0.46 + Math.sin(t * 0.9) * 6 - P.gy) * Math.min(1, dt * 2);
+        P.gx = clamp(P.gx, 60, PW - 60); P.f.phase += dt * 2.2;
+        if (t > 5.8) endAct();
+        break;
+      }
+      /* ---- エビ ---- */
+      case "wash": { // はさみで顔を洗う
+        P.tx = P.x; P.ty = fl; speedMax = 0;
+        P.f.wash = clamp(Math.min(t / 0.3, (2.5 - t) / 0.3), 0, 1); P.f.clawT += dt * 2;
+        P.nod = Math.sin(t * 15) * 0.05 * P.f.wash; P.shake = Math.sin(t * 30) * 0.6 * P.f.wash;
+        if (t > 0.5 && !P.d.said) { P.d.said = true; popText("ごしごし", P.x + dir * L * 0.3, P.y - L * 0.4); }
+        if (t > 2.6) endAct();
+        break;
+      }
+      case "backhop": { // 身をかがめて、後ろへピョンと跳ねる
+        const d = P.d, T0 = 0.35, TJ = 0.55;
+        P.f.clawT += dt;
+        if (t < T0) { P.tx = P.x; P.ty = fl; speedMax = 0; holdPitch = 0.22; }
+        else if (t < T0 + TJ) {
+          const k = (t - T0) / TJ, x1 = clamp(d.x0 - d.dir * 85, b.xr[0], b.xr[1]);
+          P.x = lerp(d.x0, x1, k); P.y = floorY("shrimp", P.x) - Math.sin(Math.PI * k) * 58;
+          P.tx = P.x; P.ty = P.y; P.vx = P.vy = 0; wagMul = 3.2; wagSpeed = 5; holdPitch = k < 0.5 ? -0.5 : 0.25; P.flip = P.tflip = d.dir;
+          if (!d.said) { d.said = true; popText("ぴょん!", P.x, P.y - L * 0.5); }
+        } else {
+          P.tx = P.x; P.ty = fl; speedMax = 0;
+          if (!d.landed) { d.landed = true; P.squash = 1; }
+          if (t > T0 + TJ + 0.5) endAct();
+        }
+        break;
+      }
+      case "hug": { // 餌を見つけて、両手で抱えてもぐもぐ食べる
+        const fd = P.food;
+        if (!fd) { endAct(); break; }
+        if (!fd.held) {
+          const toward = Math.sign(fd.x - P.x) || dir;
+          P.tx = fd.x - toward * L * 0.55; P.ty = fl; P.tflip = toward; P.lockFlip = 0.15; speedMax = 46; P.f.pick = 0.4;
+          if (Math.abs(P.x + toward * L * 0.55 - fd.x) < 10) { fd.held = true; fd.t0 = t; popText("ひょい", fd.x, fd.y - 24); }
+          if (t > 12) { P.food = null; endAct(); }
+        } else {
+          const u = t - fd.t0, hd = P.flip >= 0 ? 1 : -1;
+          P.tx = P.x; P.ty = fl; speedMax = 0; P.f.hold = clamp(Math.min(u / 0.25, 1), 0, 1); P.f.clawT += dt;
+          fd.x = P.x + hd * L * 0.57 * Math.max(0.3, Math.abs(P.flip)); fd.y = P.y + L * 0.1; fd.s = Math.max(0.15, 1 - u / 2.4);
+          P.nod = Math.sin(u * 16) * 0.03;
+          if (u > 0.4 && !fd.said) { fd.said = true; popText("もぐもぐ", P.x, P.y - L * 0.4); }
+          if (u > 2.4) { P.food = null; P.squash = 1; endAct(); }
+        }
+        break;
+      }
+      /* ---- オト ---- */
+      case "graze": { // ガラスに吸いついて、小刻みに体を震わせて削る
+        P.tx = P.x; P.ty = P.y; speedMax = 0; wagSpeed = 0.3;
+        P.shake = Math.sin(P.t * 42) * 1.5; holdPitch = 0.12;
+        if (Math.random() < dt * 9) P.puffs.push({ x: mouthX(), y: P.y + L * 0.06, vx: rnd(-12, 12), vy: rnd(-26, -6), age: 0, life: 0.7, r: rnd(0.8, 1.8) });
+        if (t > 0.4 && !P.d.said) { P.d.said = true; popText("ごしごし", P.x, P.y - L * 0.32); }
+        if (t > 3.2) endAct();
+        break;
+      }
+      case "flow": { // 吸いついたまま、水流で体がなびく
+        P.tx = P.x; P.ty = P.y; speedMax = 0; wagMul = 2.6; wagSpeed = 3.5;
+        P.nod = Math.sin(t * 3.2) * 0.34 * clamp(Math.min(t / 0.4, (2.6 - t) / 0.4), 0, 1);
+        if (t > 0.3 && !P.d.said) { P.d.said = true; popText("ゆらゆら", P.x, P.y - L * 0.34); }
+        if (t > 2.6) { P.nod = 0; endAct(); }
+        break;
+      }
+      case "pakupaku": { // 口をパクパクさせながら、目だけきょろきょろ動かす
+        P.tx = P.x; P.ty = P.y; speedMax = 0; wagSpeed = 0.4;
+        P.squash = 0.55 + 0.45 * Math.sin(t * 17); P.roll = Math.sin(t * 4.2) * 0.9;
+        if (t > 0.2 && !P.d.said) { P.d.said = true; popText("ぱくぱく", P.x + dir * L * 0.3, P.y - L * 0.32); }
+        if (t > 2.4) { P.roll = 0; endAct(); }
+        break;
+      }
       case "nibble": {
         P.tx = P.x + Math.sin(t * 2) * 6; wagSpeed = 2.2;
         holdPitch = 0.3 + Math.sin(t * 20) * 0.05;
@@ -165,13 +272,17 @@ export function updatePop(dt){
   P.vx += (desx - P.vx) * Math.min(1, dt * accel);
   P.vy += (desy - P.vy) * Math.min(1, dt * accel);
   P.x += P.vx * dt; P.y += P.vy * dt;
-  P.y = clamp(P.y, L * 0.12, popFloor(P.x) - L * (P.sp === "cory" ? 0.1 : 0.2));
+  P.y = clamp(P.y, L * 0.12, P.sp === "snail" || P.sp === "shrimp" ? floorY(P.sp, P.x) : popFloor(P.x) - L * (P.sp === "cory" ? 0.1 : 0.2));
   if (P.lockFlip > 0) P.lockFlip -= dt; else if (Math.abs(P.vx) > 12) P.tflip = Math.sign(P.vx);
   P.flip += clamp(P.tflip - P.flip, -dt * 3.8, dt * 3.8);
   const pt = holdPitch !== null ? holdPitch : clamp(Math.atan2(P.vy, Math.abs(P.vx) + 40), -0.35, 0.35);
   P.pitch += (pt - P.pitch) * Math.min(1, dt * 4);
   const effort = Math.min(1, Math.hypot(P.vx, P.vy) / 90);
-  P.f.phase += dt * (2.2 + effort * 7) * S.wagRate * wagSpeed;
+  if (P.sp === "snail" || P.sp === "shrimp") { // 這う・歩く種:動いているときだけ脚・触角が動く。止まっている間はつまむ(エビ)
+    P.f.phase += dt * (0.4 + Math.min(1, Math.hypot(P.vx, P.vy) / 12) * 7) * wagSpeed;
+    if (P.sp === "shrimp") { const still = effort < 0.15 && !P.act; P.f.pick += ((still ? 1 : P.act === "hug" || P.act === "wash" || P.act === "backhop" ? P.f.pick : 0.15) - P.f.pick) * Math.min(1, dt * 5); P.f.clawT += dt * (0.5 + P.f.pick); }
+  } else P.f.phase += dt * (2.2 + effort * 7) * S.wagRate * wagSpeed;
+  P.gv += ((P.act === "glassview" && P.actT < 5.3 ? 1 : 0) - P.gv) * Math.min(1, dt * 4);
   P.wagMul = wagMul; P.effort = effort;
   P.squash = Math.max(0, P.squash - dt * 5);
   if (P.act !== "dash" && P.trail.length) P.trail.shift();
@@ -181,7 +292,7 @@ export function updatePop(dt){
   P.bubbles = P.bubbles.filter(bb => !bb.dead || (P.d.b === bb && P.act === "bubble"));
   if (Math.random() < dt * 2) P.amb.push({ x: PW * 0.9 + rnd(-4, 4), y: popFloor(PW * 0.9), r: rnd(1, 2.6), k: Math.random() * 9 });
   P.amb.forEach(a => { a.y -= 34 * dt; a.x += Math.sin(P.t * 4 + a.k) * 8 * dt; }); P.amb = P.amb.filter(a => a.y > 0);
-  if (P.food) { P.food.y = Math.min(popFloor(P.food.x) - 3, P.food.y + P.food.vy * dt); P.food.x += Math.sin(P.t * 2 + P.food.k) * 10 * dt; }
+  if (P.food && !P.food.held) { P.food.y = Math.min(popFloor(P.food.x) - 3, P.food.y + P.food.vy * dt); P.food.x += Math.sin(P.t * 2 + P.food.k) * (P.act === "hug" ? 0 : 10) * dt; }
   [P.texts, P.sparks, P.puffs].forEach(arr => arr.forEach(o => { o.age += dt; if (o.vx !== undefined) { o.x += o.vx * dt; o.y += o.vy * dt; o.vy += 60 * dt; } }));
   P.texts = P.texts.filter(o => o.age < o.life); P.sparks = P.sparks.filter(o => o.age < o.life); P.puffs = P.puffs.filter(o => o.age < o.life);
 }
@@ -191,7 +302,7 @@ function drawPopFish(x, y, flip, pitch, alpha){
   const wag = Math.sin(P.f.phase) * SPECIES[P.sp].wag * P.wagMul * (0.45 + 0.55 * P.effort);
   ctx.save();
   setBaseA(alpha * SPECIES[P.sp].alpha); ctx.globalAlpha = BASE_A;
-  ctx.translate(x + P.shake, y + Math.sin(P.t * 1.4) * 1.6);
+  ctx.translate(x + P.shake, y + (P.sp === "snail" || P.sp === "shrimp" ? 0 : Math.sin(P.t * 1.4) * 1.6));
   ctx.rotate((pitch + P.nod + P.spin) * dir);
   const sq = P.squash * 0.08;
   ctx.scale(dir * Math.max(0.1, Math.abs(flip)) * (1 - sq), 1 + sq);
@@ -232,7 +343,7 @@ export function drawPop(){
   // 背景の泡
   P.amb.forEach(a => { ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.lineWidth = 0.8; ctx.beginPath(); ctx.arc(a.x, a.y, a.r, 0, TAU); ctx.stroke(); });
   // 餌
-  if (P.food) { ctx.fillStyle = "#e9a24a"; ctx.save(); ctx.translate(P.food.x, P.food.y); ctx.rotate(P.t * 1.5 + P.food.k); ctx.fillRect(-3.5, -2.2, 7, 4.4); ctx.restore(); }
+  if (P.food) { ctx.fillStyle = "#e9a24a"; ctx.save(); ctx.translate(P.food.x, P.food.y); ctx.rotate(P.t * 1.5 + P.food.k); if (P.food.s !== undefined) ctx.scale(P.food.s, P.food.s); ctx.fillRect(-3.5, -2.2, 7, 4.4); ctx.restore(); }
   // 影
   const gap = popFloor(P.x) - P.y;
   ctx.fillStyle = `rgba(20,45,40,${0.22 * clamp(1 - gap / 140, 0, 1)})`;
@@ -250,7 +361,8 @@ export function drawPop(){
     edx = vx / dd * dir * m; edy = vy / dd * m;
   }
   setEye({ dx: edx, dy: edy, roll: P.roll });
-  drawPopFish(P.x, P.y, P.flip, P.pitch, 1);
+  if (P.gv < 0.98) drawPopFish(P.x, P.y, P.flip, P.pitch, 1 - P.gv);
+  if (P.sp === "snail" && P.gv > 0.02) drawSnailFront(P.f, L * 1.15, P.gx, P.gy, P.gdir > 0 ? 0 : Math.PI, P.gv); // 前面ガラスの貝(足の裏と口)
   setEye(null);
   // 泡
   P.bubbles.forEach(bb => {

@@ -220,6 +220,8 @@ const LOG_FRAMES = {
 };
 
 const ACTS = ["turn", "food", "bubble", "wiggle", "spin", "startle", "peek", "dash", "showoff", "bow", "wink", "nibble"]; // smoke.mjs と同じ
+// お掃除生体の固有の仕草(それぞれの種で実行する。ORDER に新しい種がないハーネスでは対象外 = 既存の仕草の順・乱数消費は変わらない)
+const ACTS_NEW = { snail: ["hide", "flip", "glassview"], shrimp: ["wash", "backhop", "hug"], oto: ["graze", "flow", "pakupaku"] }; // smoke.mjs と同じ
 const ACT_LOG_FRAMES = [1, 2, 20, 40]; // 開始直後と中盤(仕草の開始からの番号)
 const ACT_MAX_FRAMES = 600;
 
@@ -316,6 +318,25 @@ function runScenario(env, app) {
     lines.push(`--- act ${act} ended=${ended} frames=${n} ---`);
   }
   A.closePop(0);
+  for (const [sp, acts] of Object.entries(ACTS_NEW)) {
+    if (!A.ORDER.includes(sp)) continue;
+    A.openPop(sp, anchor);
+    for (const act of acts) {
+      A.startAct(act);
+      let n = 0, ended = false;
+      while (n < ACT_MAX_FRAMES && !ended) {
+        n++;
+        const logged = ACT_LOG_FRAMES.includes(n);
+        setRec(logged, "popcv");
+        if (logged) { lines.push(`--- act ${sp}:${act} frame ${n} t=${env.getNow().toFixed(6)} ---`); cur.frames.push(`${sp}:${act}:${n}`); }
+        tick();
+        setRec(false);
+        if (!A.P.act) ended = true;
+      }
+      lines.push(`--- act ${sp}:${act} ended=${ended} frames=${n} ---`);
+    }
+    A.closePop(0);
+  }
   env.tick();
   cur.end = lines.length;
   return stageLines;
