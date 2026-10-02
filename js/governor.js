@@ -1,10 +1,10 @@
 // 性能による表現の切り替え(なめた跡)。依存なし。
 // 毎フレームの logic+draw の所要時間(ms、JS の処理時間だけ)を main.js が測って govTick に渡す。
-// 3 秒の移動平均が GOV.thresholdMs(16.7ms の 15% ≒ 2.5ms)を超えたら、跡の表現を GOV.fadeSec かけて消し("fading" → "off")、そのセッションの間は戻さない。
+// 3 秒の移動平均が GOV.thresholdMs(16.67ms の約 24% = 4ms)を超えたら、跡の表現を GOV.fadeSec かけて消し("fading" → "off")、そのセッションの間は戻さない。
 // 起動・resize・タブが表示に戻った直後の GOV.graceSec 秒と、タブが hidden の間は判定しない(テクスチャ生成の引っかかりや停止を数えない)。
 // 苔の量(状態)には一切触れない。見た目の層だけを切り替える。
 export const GOV = {
-  thresholdMs: 2.5, windowSec: 3, graceSec: 3, fadeSec: 1,
+  thresholdMs: 4, windowSec: 3, graceSec: 3, fadeSec: 1,
   override: null, // テスト専用:数値を入れると実測の代わりに使う(本番では常に null)
 };
 let mode = "on", fade = 1, grace = GOV.graceSec, avg = 0;

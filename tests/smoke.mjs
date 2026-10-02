@@ -712,9 +712,10 @@ for (const [sp, acts] of Object.entries(ACTS_NEW)) {
   ag.setAgingState({ algaeGlass: 0.7, algaeHard: 0.4 }); ag.setAgingOn(false); // 苔の量が切り替えの前後で同じことを見るため、時間経過を止める
   place(); const g0 = ag.algaeGlass, h0 = ag.algaeHard;
   gov.govReset();
-  const seq = modeSeq(5, 60 * 9);
+  const OVER = gov.GOV.thresholdMs + 1; // しきい値を確実に超える値
+  const seq = modeSeq(OVER, 60 * 9);
   const iFade = firstIdx(seq, "fading"), iOff = firstIdx(seq, "off");
-  check("切り替え:最初の 3 秒は 2.5ms 超を与えても判定しない(on のまま)", iFade >= 60 * 3, `fading になったのは ${iFade} フレーム目(= ${(iFade / 60).toFixed(1)} 秒)`);
+  check(`切り替え:最初の 3 秒はしきい値(${gov.GOV.thresholdMs}ms)超の ${OVER}ms を与えても判定しない(on のまま)`, iFade >= 60 * 3, `fading になったのは ${iFade} フレーム目(= ${(iFade / 60).toFixed(1)} 秒)`);
   check("切り替え:超え続けると、3 秒の平均が超えた時点で fading になり、約 1 秒で off になる", iFade > 0 && iOff > iFade && Math.abs((iOff - iFade) / 60 - gov.GOV.fadeSec) < 0.1, `fading ${(iFade / 60).toFixed(2)} 秒 → off ${(iOff / 60).toFixed(2)} 秒(差 ${((iOff - iFade) / 60).toFixed(2)} 秒)`);
   st = TS();
   check("切り替え:off になると跡の表現が消える(マスク・作り置きなし)", gov.govState().mode === "off" && st.mw === 0 && !st.glass && !st.hard && !st.cached && gov.trailStrength() === 0, JSON.stringify(st));
@@ -723,11 +724,11 @@ for (const [sp, acts] of Object.entries(ACTS_NEW)) {
   check("切り替え:以後 1.0ms を与えても戻らない(そのセッションの間は off)", seq2.every(m => m === "off") && TS().mw === 0);
   // タブが hidden の間は判定しない。表示に戻った直後の 3 秒も判定しない
   gov.govReset(); document.visibilityState = "hidden";
-  const seqH = modeSeq(5, 60 * 10);
+  const seqH = modeSeq(OVER, 60 * 10);
   document.visibilityState = "visible"; (document.L.visibilitychange || []).forEach(f => f());
-  const seqV = modeSeq(5, 60 * 9);
+  const seqV = modeSeq(OVER, 60 * 9);
   const iV = firstIdx(seqV, "fading");
-  check("切り替え:hidden の間は判定しない(10 秒間 5ms を与えても on)", seqH.every(m => m === "on"));
+  check(`切り替え:hidden の間は判定しない(10 秒間 ${OVER}ms を与えても on)`, seqH.every(m => m === "on"));
   check("切り替え:表示に戻った直後の 3 秒は判定しない(その後の 3 秒平均で fading)", iV >= 60 * 3 && iV < 60 * 9, `fading は ${(iV / 60).toFixed(1)} 秒後`);
   gov.govReset(); gov.GOV.override = null; ag.setAgingOn(true);
   A.fishes.forEach(f => { if (f.cr) f.cr.t = 0; });
