@@ -607,7 +607,7 @@ const CAUS_LAYERS = [    // 2 枚を別方向・別速度に流し、screen で�
   { phase: 71, sw: 180, sh: 108, vx: -3.6, vy: 0.9, ox: 60, oy: 40 },
 ];
 function mkCanvas(w, h){ const c = document.createElement("canvas"); c.width = w; c.height = h; return [c, c.getContext("2d")]; }
-// 一度だけ使う画素計算(元の computeCaustics と同じ式。タイルの継ぎ目が出ないよう、明示の px/py は定数 -250 にして周期にした)
+// 一度だけ使う画素計算(単一ファイル時代の毎フレームの画素計算と同じ式。タイルの継ぎ目が出ないよう、明示の px/py は定数 -250 にして周期にした)
 function causticsMask(time){
   const n = CAUS_TILE, [c, g] = mkCanvas(n, n), img = g.createImageData(n, n), d = img.data;
   let k = 0;
