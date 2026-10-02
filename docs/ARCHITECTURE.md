@@ -14,7 +14,7 @@
 | `js/core.js` | ユーティリティ(`TAU`、`clamp`、`lerp`、`mulberry`、`noise1`、`mix`)、`W` `H` `U` `DPR` `waterTop`、`ctx`、`Tset` `Tw` `timeScale` `nightOn` `nightT`、`counts`、保存と復元、`sandY` `bottomY` `current`、セッター |
 | `js/fish-render.js` | 描画ヘルパ、`BASE_A`、`EYE`、`PAINT`、`drawFish` |
 | `js/fish-behavior.js` | `fishes`、`schools`、`makeFish`、`syncFish`、`updateHealth`、`updateSchools`、`updateFish` |
-| `js/scene.js` | `buildScene`、`makeStatic`、水草・流木・岩・浮草の描画、コースティクス・光の筋・水面、温度計、24時間計(`clockHourAngle`、`drawClock`)、LED・色調補正・ガラス、エアストーン・泡・粒子 |
+| `js/scene.js` | `buildScene`、`makeStatic`、水草・流木・岩・浮草の描画、コースティクス・光の筋・水面(光の素材は `buildLight` で作り置き)、温度計、24時間計(`clockHourAngle`、`drawClock`)、LED・色調補正・ガラス、エアストーン・泡・粒子 |
 | `js/popup.js` | 拡大ポップアップ(`P`、`startAct`、`updatePop`、`drawPop`、`openPop` / `closePop`) |
 | `js/ui.js` | パネル、全画面表示、`updatePanel` |
 | `js/perf.js` | `?perf` のときだけ有効な性能計測(`PERF`、`perfBegin` / `perfMark` / `perfEnd` / `perfFrame` / `perfReport`)。ほかに依存しない |
@@ -49,7 +49,6 @@ ES Modules では、import した変数へ代入できない。`ctx` や `U` の
 |---|---|
 | `core.js` | `setCtx`、`setU`、`setW`、`setH`、`setDPR`、`setWaterTop`、`setTset`、`setTw`、`setTimeScale`、`setNightOn`、`setNightT` |
 | `fish-render.js` | `setBaseA`、`setEye` |
-| `scene.js` | `setCCol`(コースティクスの色) |
 
 ---
 
@@ -82,7 +81,7 @@ GitHub Pages(サブパス配信)に置き、Safari の「ホーム画面に追�
  └─ 開始:resize() → syncFish() → updatePanel() → requestAnimationFrame(loop)
 
 loop(毎フレーム)
- ├─ nightT を照明の目標へ補間、コースティクスの色を更新
+ ├─ nightT を照明の目標へ補間
  ├─ 水温 Tw を設定温度へ近づける
  ├─ updateSchools → 各魚の updateHealth / updateFish
  ├─ updateBubbles
@@ -123,7 +122,7 @@ loop(毎フレーム)
 順番を入れ替えると奥行きや光の当たり方が崩れます。
 
 1. 静的背景(昼。夜は `nightT` で夜の背景を重ねる)
-2. 光の筋(`screen` 合成)
+2. 光の筋(5 本。作り置きのスプライトを `screen` 合成)
 3. 奥の水草(透明度 0.78)
 4. 霞(奥を少しかすませる)
 5. エアストーンと泡
@@ -133,10 +132,10 @@ loop(毎フレーム)
 9. 手前の魚(`z ≥ 0.45`)
 10. 前景の草(ヘアーグラス、小さな葉の絨毯)
 11. 浮草(根と影を含む)
-12. 漂う粒子と玉ボケ
-13. コースティクス(水中全体と、砂の上にもう一度)
-14. 水面と部屋、水面のきらめき
-15. 色調補正(`grade()`。夜は `nightGrade()` で乗算・スクリーン・ソフトライト)
+12. 漂う粒子と玉ボケ(玉ボケは作り置きの画像)
+13. コースティクス(2 層のテクスチャを流して `screen`。水中全体と、砂の上にもう一度)
+14. 水面と部屋、水面のきらめき(20 個)
+15. 色調補正(`grade()`。昼はソフトライトと光だまり。夜は `nightGrade()` で暗幕の乗算 1 回とソフトライト 1 回)
 16. LED 照明の器具
 17. 温度計
 18. 24時間計(温度計とガラスの間。端末のローカル時刻)
@@ -154,10 +153,13 @@ loop(毎フレーム)
 - `current(x, t)`:値ノイズを重ねた水流の場。ゆっくりした大きなうねりと細かな揺らぎを足している。
 - `spine(p, t)`:根元から先端へ節ごとに角度を決める。先端ほど水流の影響が大きく(`s^1.25`)、時刻を `s × 1.1` だけ遅らせるので、揺れが根元から先端へ波のように伝わる。
 
-## コースティクス
+## 光の作り置き
 
-- 150×90 の小さな画像を 2 フレームに 1 回計算し、拡大して `screen` 合成する。拡大時の補間でやわらかい網目になる。
-- 色 `cCol` は昼が暖かい白、夜が青白い白。
+- `buildLight()` が `buildScene()` の最後に呼ばれる(`resize()` のたび)。毎フレームは `drawImage` と、作り置きのグラデーションの `fill` だけで、グラデーションの生成や画素計算はしない。
+- 初回のみ作る(大きさに依存しない):コースティクスのタイル(188×188 の周期テクスチャを位相違いで 2 枚。昼用・夜用に色付けし、継ぎ目をまたいでも切れないよう 2×2 に並べる)と、夜の LED 暗幕(128×96。縦と横の暗さを 1 枚に焼いた乗算用)。画素計算は初回の 1 回だけ。
+- `resize()` のたびに作る:光の筋のスプライト(昼用・夜用)、玉ボケのスプライト、画面の大きさに依存するグラデーション(空・水面の帯・昼夜のソフトライト・光だまり)。
+- コースティクス(`drawCaustics`):2 枚のテクスチャの窓を別方向・別速度でずらし(窓は元画像の一部を拡大して貼る)、`screen` で重ねる。昼夜は `nightT` で 2 色を混ぜる。ループは周期テクスチャなので継ぎ目がない。
+- テクスチャ生成は乱数を使わず、`buildScene` の乱数列にも影響しない。筋(7 本ぶん)ときらめき(46 個ぶん)は、以降の配置を動かさないよう乱数を消費してから、5 本・20 個だけ採用している。
 
 ## ポップアップ(`P`)
 

@@ -62,7 +62,7 @@ package.json          npm test / drawlog / school / release / serve
 | `js/species.js` | 魚の種類 | `SPECIES`(種ごとの大きさ・速さ・群れ度・生息層・適温・透明度)、`ORDER`、色バリエーション、ポップアップの説明文 `NOTES` と体長 `POP_L` |
 | `js/fish-render.js` | 描画ヘルパ | 体・尾・ひれのパス、`shade`(陰影と縁の光)、`eye`、`BASE_A`、`EYE`、`PAINT`(種ごとの描画関数)、`drawFish` |
 | `js/fish-behavior.js` | 魚の生成 / 体調・行動 | `fishes`、`schools`、`makeFish`、`syncFish`、`updateHealth`、`updateFish`(群れ・分離・壁・温度による層の移動)。群れる種(ネオン・ラミー)は縦の散らばり 1.0、前後に楕円の分離(1.3)、速度が基準の 10% 未満なら円形の分離 |
-| `js/scene.js` | 配置 / 水草の描画 / 光・水面 / 温度計 / 24時間計 / ガラスの映り込み / エアストーン・泡・浮遊物 | `buildScene()`(水草・岩・流木・浮草・光の筋などを乱数シード固定で生成)、`makeStatic()`(昼/夜の静的背景)、`spine`(水流で揺れる背骨)と各水草・流木・こけ・浮草の描画、コースティクス、光の筋、水面、夜の照明、LED、色調補正、温度計、24時間計(`clockHourAngle`・`drawClock`)、泡 |
+| `js/scene.js` | 配置 / 水草の描画 / 光・水面 / 温度計 / 24時間計 / ガラスの映り込み / エアストーン・泡・浮遊物 | `buildScene()`(水草・岩・流木・浮草・光の筋などを乱数シード固定で生成)、`makeStatic()`(昼/夜の静的背景)、`spine`(水流で揺れる背骨)と各水草・流木・こけ・浮草の描画、コースティクス・光の筋・水面・玉ボケ(光の素材は `buildLight()` が作り置き。buildScene の最後に呼ばれる)、夜の照明、LED、色調補正、温度計、24時間計(`clockHourAngle`・`drawClock`)、泡 |
 | `js/popup.js` | 拡大ポップアップ | 小さな水槽の状態 `P`、行動の状態機械(`startAct` / `updatePop`)、描画、開閉 |
 | `js/ui.js` | パネル / 全画面表示 | 魚の選択 UI、照明切り替え、全画面 API とその代替表示、`updatePanel` |
 | `js/perf.js` | 性能計測 | `?perf` を付けて開いたときだけ有効。描画の区間ごとの所要時間を表示(iPhone では 95 匹でも 60fps、draw 約 4ms)。無効時は何もしない |
@@ -74,7 +74,7 @@ package.json          npm test / drawlog / school / release / serve
 
 - **`PAINT` の中で `ctx.globalAlpha = 1` と書かない。** 魚の半透明は `BASE_A` を基準にしている。一時的に透明度を下げたら `ctx.globalAlpha = BASE_A` で戻す。
 - **`ctx` と `U` は差し替えて使っている。** パネルのアイコンとポップアップは、`ctx` を別の Canvas に、`U`(長さの単位)を別の値に一時的に差し替えて `PAINT` を呼ぶ。描画関数は、`core.js` から import した素の `ctx` と `U` だけを使うこと(`G.ctx` のような書き換えはしない)。
-- **import した変数へは代入できない。** 共有の変数(`ctx`・`U`・`W`・`H`・`DPR`・`waterTop`・`Tset`・`Tw`・`timeScale`・`nightOn`・`nightT`、`BASE_A`・`EYE`、`cCol`)は、所有するモジュールで `export let` とし、書き換えは所有モジュールが export するセッター(`setCtx`・`setU`・`setBaseA`・`setEye` など)で行う。読み取りは import した名前をそのまま使う(ライブバインディングなので、差し替え後の値が見える)。
+- **import した変数へは代入できない。** 共有の変数(`ctx`・`U`・`W`・`H`・`DPR`・`waterTop`・`Tset`・`Tw`・`timeScale`・`nightOn`・`nightT`、`BASE_A`・`EYE`)は、所有するモジュールで `export let` とし、書き換えは所有モジュールが export するセッター(`setCtx`・`setU`・`setBaseA`・`setEye` など)で行う。読み取りは import した名前をそのまま使う(ライブバインディングなので、差し替え後の値が見える)。
 - **長さは `U` を単位に書く。** `U = min(W/1000, H/625)`。全画面では縦横比が変わる。
 - **`EYE` はポップアップ専用。** 視線とウインクのために `setEye()` で一時的に設定し、描画後に `null` へ戻す。
 - **描画順には意味がある。** 静的背景 → 光の筋 → 奥の水草 → 霞 → 泡 → 奥の魚 → 薄い霞 → 流木・岩・こけ・中景の草 → 手前の魚 → 前景の草 → 浮草 → 粒子 → コースティクス → 水面 → 色調補正 → LED → 温度計 → 時計 → ガラス。詳細は `docs/ARCHITECTURE.md`。
