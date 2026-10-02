@@ -8,6 +8,7 @@ const PRECACHE = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
+  "./js/aging.js",
   "./js/core.js",
   "./js/fish-behavior.js",
   "./js/fish-render.js",

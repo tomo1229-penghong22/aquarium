@@ -1,7 +1,8 @@
 // 描画順(draw)・毎フレームの更新(loop)・リサイズ・開始処理。
 // このファイルがエントリポイント。全モジュールの評価が終わってから、末尾の「開始」が実行される。
-import { DPR, H, Tset, Tw, W, clamp, ctx, cv, nightOn, nightT, setDPR, setH, setNightT, setTw, setU, setW, setWaterTop, tankEl, timeScale, waterTop } from "./core.js";
+import { DPR, H, save, Tset, Tw, W, clamp, ctx, cv, nightOn, nightT, setDPR, setH, setNightT, setTw, setU, setW, setWaterTop, tankEl, timeScale, waterTop } from "./core.js";
 import { ORDER } from "./species.js";
+import { checkMaintenance, fishLoadOf, initAging, onVisibility, updateAging } from "./aging.js";
 import { drawFish } from "./fish-render.js";
 import { fishes, schools, syncFish, updateFish, updateHealth, updateSchools } from "./fish-behavior.js";
 import { bubbles, buildScene, drawBubbles, drawCarpet, drawCaustics, drawClock, drawFern, drawFixture, drawFloats, drawGlass, drawLotus, drawMoss, drawMotes, drawRays, drawRibbon, drawRock, drawStem, drawSurface, drawSword, drawThermometer, drawWood, grade, plants, rocks, staticLayer, staticNight, updateBubbles } from "./scene.js";
@@ -75,6 +76,8 @@ function loop(now){
   updateSchools(dt);
   fishes.forEach(f => { updateHealth(f, dt); updateFish(f, dt); });
   updateBubbles(dt, T);
+  let load = 0; for (const f of fishes) load += fishLoadOf(f.sp, f.scale);
+  updateAging(dt, { load, T: Tw });
   if (PERF) perfEnd("logic");
   draw();
   if (PERF) perfReport(cv, DPR, fishes.length);
@@ -96,9 +99,13 @@ export function resize(){
 }
 
 /* ---------------- 開始 ---------------- */
+initAging(Date.now());
+checkMaintenance(Date.now());
 resize();
 syncFish();
 updatePanel();
 let rt = 0;
 window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(resize, 120); });
+document.addEventListener("visibilitychange", () => onVisibility(document.visibilityState === "hidden", Date.now()));
+window.addEventListener("pagehide", () => save());
 requestAnimationFrame(t => { last = t; requestAnimationFrame(loop); });

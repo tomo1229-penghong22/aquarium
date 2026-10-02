@@ -15,13 +15,24 @@ export function mix(c1, c2, t){ const a = hexRgb(c1), b = hexRgb(c2); return `rg
 /* ---------------- 状態 ---------------- */
 export const counts = {}; ORDER.forEach(k => counts[k] = SPECIES[k].def);
 export let Tset = 25, Tw = 25, timeScale = 1, nightOn = false, nightT = 0;
+let savedRaw = null; // 読み込んだ保存データの生オブジェクト(aging.js が自分の項目を読む口)
 try {
   const saved = JSON.parse(localStorage.getItem("aquarium-v1") || "null");
+  savedRaw = saved && typeof saved === "object" ? saved : null;
   if (saved) { ORDER.forEach(k => { if (typeof saved.counts?.[k] === "number") counts[k] = clamp(saved.counts[k], 0, SPECIES[k].max); });
     if (typeof saved.T === "number") { Tset = Tw = clamp(saved.T, 18, 34); }
     if (saved.night) { nightOn = true; nightT = 1; } }
 } catch (e) {}
-export function save(){ try { localStorage.setItem("aquarium-v1", JSON.stringify({ counts, T: Tset, night: nightOn })); } catch (e) {} }
+export function getSavedRaw(){ return savedRaw; }
+/* 追加の保存項目:fn() が返すオブジェクトを、保存データへ混ぜる(循環 import を避けるための登録口) */
+let extraSave = null;
+export function setExtraSave(fn){ extraSave = fn; }
+export function save(){
+  try {
+    let extra = null; try { extra = extraSave ? extraSave() : null; } catch (e) {}
+    localStorage.setItem("aquarium-v1", JSON.stringify({ counts, T: Tset, night: nightOn, ...extra }));
+  } catch (e) {}
+}
 
 export const cv = document.getElementById("tank");
 export const tankEl = cv.parentElement;

@@ -5,7 +5,7 @@
   "description": "ブラウザで動くインタラクティブな熱帯魚の水槽(ES Modules・ビルドなし)",
   "type": "module",
   "scripts": {
-    "test": "node tests/smoke.mjs",
+    "test": "node tests/smoke.mjs && node tests/aging.mjs",
     "drawlog": "node tests/drawlog.mjs",
     "school": "node tests/school-metric.mjs",
     "release": "node tools/release.mjs",
