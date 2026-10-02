@@ -4,9 +4,10 @@ import { DPR, counts, H, save, Tset, Tw, W, clamp, ctx, cv, nightOn, nightT, set
 import { ORDER, SPECIES } from "./species.js";
 import { applyAgingParam, checkMaintenance, fishLoadOf, initAging, onVisibility, updateAging } from "./aging.js";
 import { drawFish } from "./fish-render.js";
-import { drawCrawlers, relayout, updateCrawler } from "./crawlers.js";
+import { drawCrawlers, grazers, relayout, updateCrawler } from "./crawlers.js";
+import { govGrace, govTick, trailStrength } from "./governor.js";
 import { fishes, schools, syncFish, updateFish, updateHealth, updateSchools } from "./fish-behavior.js";
-import { bubbles, buildMeter, buildScene, drawBubbles, drawCarpet, drawAgingGlass, drawAgingHard, drawCaustics, drawClock, drawFern, drawFixture, drawFloats, drawGlass, drawLotus, drawMoss, drawMotes, drawO2Meter, drawPuffs, drawRays, drawRibbon, drawRock, drawStem, drawSurface, drawSword, drawThermometer, drawWood, grade, plants, rocks, staticLayer, staticNight, updateBubbles, updatePuffs } from "./scene.js";
+import { bubbles, buildMeter, buildScene, drawBubbles, drawCarpet, drawAgingGlass, drawAgingHard, drawCaustics, drawClock, drawFern, drawFixture, drawFloats, drawGlass, drawLotus, drawMoss, drawMotes, drawO2Meter, drawPuffs, drawRays, drawRibbon, drawRock, drawStem, drawSurface, drawSword, drawThermometer, drawWood, grade, plants, rocks, staticLayer, staticNight, updateBubbles, updatePuffs, updateTrails } from "./scene.js";
 import { autoLightTick, layoutClockBtn, showNoticeIfAny, updatePanel } from "./ui.js";
 import { PERF, perfBegin, perfEnd, perfFrame, perfMark, perfReport } from "./perf.js";
 
@@ -79,6 +80,7 @@ function draw(){
 
 function loop(now){
   if (PERF) perfFrame(now);
+  const tStart = performance.now(); // logic+draw の所要時間を測る(性能による切り替え。?perf の有無にかかわらず)
   const dt = Math.min(0.05, (now - last) / 1000), realDt = Math.min(1, (now - last) / 1000); last = now; T += dt; frameNo++;
   // realDt:時間経過用の実経過秒(低 fps でも 1:1。非表示で rAF が止まった間は 1 秒までしか数えない)。他の更新は従来の dt
   const rate = 0.6 * Math.sqrt(timeScale);
@@ -90,8 +92,10 @@ function loop(now){
   updateBubbles(dt, T); updatePuffs(dt, T);
   let load = 0; for (const f of fishes) load += fishLoadOf(f.sp, f.scale);
   updateAging(realDt, { load, T: Tw, counts });
+  updateTrails(dt, grazers(), trailStrength()); // なめた跡(見た目の層)
   if (PERF) perfEnd("logic");
   draw();
+  govTick(performance.now() - tStart, realDt);
   if (PERF) perfReport(cv, DPR, fishes.length);
   if (frameNo % 15 === 0) updatePanel();
   lightAcc += dt; if (lightAcc >= 1) { lightAcc = 0; autoLightTick(Date.now()); } // 照明の自動判定は約1秒ごと
@@ -111,6 +115,7 @@ export function resize(){
   buildScene();
   relayout();
   layoutClockBtn();
+  govGrace(); // 作り直し直後の 3 秒は性能を判定しない
 }
 
 /* ---------------- 開始 ---------------- */
@@ -128,7 +133,7 @@ window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(resi
 document.addEventListener("visibilitychange", () => {
   const hidden = document.visibilityState === "hidden";
   onVisibility(hidden, Date.now());
-  if (!hidden) { checkMaintenance(Date.now()); showNoticeIfAny(); } // 非表示の間に期日が来た分は「非表示中に実施した」扱い
+  if (!hidden) { govGrace(); checkMaintenance(Date.now()); showNoticeIfAny(); } // 非表示の間に期日が来た分は「非表示中に実施した」扱い
 });
 window.addEventListener("pagehide", () => save());
 requestAnimationFrame(t => { last = t; requestAnimationFrame(loop); });

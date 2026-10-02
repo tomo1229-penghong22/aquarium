@@ -255,7 +255,7 @@ export function grazers(){
   for (const f of fishes) {
     const c = f.cr; if (!SPECIES[f.sp].solo || !c || c.fph) continue;
     const L = SPECIES[f.sp].len * U * f.scale;
-    if (f.sp === "snail" && c.surf === "gF") out.push({ kind: "glassF", sp: "snail", x: c.fx * W + Math.cos(c.hdD) * L * 0.6, y: c.fy * H + Math.sin(c.hdD) * L * 0.6, r: L * 0.35, active: true });
+    if (f.sp === "snail" && c.surf === "gF") out.push({ kind: "glassF", sp: "snail", x: c.fx * W + Math.cos(c.hdD) * L * 0.6, y: c.fy * H + Math.sin(c.hdD) * L * 0.6, r: L * 0.45, active: true });
     else if (f.sp === "oto" && c.surf === "gF" && c.st === "stick") out.push({ kind: "glassF", sp: "oto", x: c.fx * W, y: c.fy * H, r: L * 0.4, active: c.gz === 1 });
     else if (f.sp === "shrimp" && (c.surf === "rock" || c.surf === "wood") && c.st !== "hop") out.push({ kind: "hard", sp: "shrimp", x: c.x, y: c.y, r: L * 0.3, active: c.st === "pick" });
   }

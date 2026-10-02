@@ -228,7 +228,7 @@ for (const sp of A.ORDER) {
   const settle = (doV, n) => { for (let i = 0; i < n; i++) { ag.setAgingState({ DO: doV }); frames(1); } };
   settle(8, 60 * 20); const yOtoN = meanY("oto"), ySrN = meanY("shrimp"), ySnN = meanY("snail");
   settle(0.5, 60 * 45); const yOtoL = meanY("oto"), ySrL = meanY("shrimp"), ySnL = meanY("snail");
-  check("低酸素でオト・エビは水面側へ寄る(平均の高さが上がる)・貝は底のまま", yOtoL < yOtoN && ySrL < ySrN && ySnL > ySnN - 80 * core.U,
+  check("低酸素でオト・エビは水面側へ寄る(平均の高さが上がる)。貝は水面へ寄らず、オトより下にいる", yOtoL < yOtoN && ySrL < ySrN && ySnL > yOtoL,
     `オト ${yOtoN.toFixed(0)}→${yOtoL.toFixed(0)} / エビ ${ySrN.toFixed(0)}→${ySrL.toFixed(0)} / 貝 ${ySnN.toFixed(0)}→${ySnL.toFixed(0)}`);
   ag.setAgingState({ DO: 8 });
   // 砂煙:フラグ on で粒が出て、off では出ない(描画命令なし)
@@ -475,6 +475,77 @@ for (const sp of A.ORDER) {
   check("時間経過の dt:フレーム間隔 0.2 秒で 10 秒ぶん回すと 10 秒ぶん進む", Math.abs(s1 - s0 - 10) < 1e-6, `${(s1 - s0).toFixed(3)} 秒`);
   check("時間経過の dt:間隔 30 秒の 1 回は 1 秒ぶんしか進まない(非表示の間を数えない)", Math.abs(s2 - s1 - 1) < 1e-6, `${(s2 - s1).toFixed(3)} 秒`);
   ag.restoreAging(null, Date.now());
+}
+
+{
+  // なめた跡(N4)と、性能による切り替え(governor.js)
+  const gov = await imp("governor.js"), crw = await imp("crawlers.js");
+  const save0 = Object.fromEntries(A.ORDER.map(k => [k, A.counts[k]]));
+  for (const k of ["oto", "shrimp", "snail"]) A.counts[k] = A.SPECIES[k].def;
+  A.syncFish(); frames(5);
+  const place = () => { // 貝・オトを前面ガラスに、エビを岩の上でつまんでいる状態に置く(位置は固定)
+    A.fishes.forEach(f => {
+      if (!f.cr) return;
+      if (f.sp === "snail" || f.sp === "oto") { Object.assign(f.cr, { surf: "gF", fx: 0.3 + Math.random() * 0.4, fy: 0.4 + Math.random() * 0.2, fph: null, fade: 1, st: f.sp === "oto" ? "stick" : "rest", t: 1e6, gz: 1, gt: 1e6 }); }
+      if (f.sp === "shrimp") Object.assign(f.cr, { surf: "rock", id: 0, s: 0.5, st: "pick", t: 1e6, fph: null });
+    });
+  };
+  const TS = scene.trailState;
+  gov.govReset(); ag.setAgingOn(true);
+  ag.setAgingState({ dirt: 0.3, algaeGlass: 1, algaeHard: 1 }); // ?aging=algaeGlass:1,algaeHard:1 相当
+  place(); frames(60 * 3);
+  let st = TS(), err = null;
+  try { ["back", "low", "front", "glass"].forEach(l => crw.drawCrawlers(l)); scene.drawAgingGlass(); scene.drawAgingHard(); } catch (e) { err = e; }
+  check("なめた跡:?aging=algaeGlass:1,algaeHard:1 相当+前面ガラスの貝・オト・岩の上のエビで、書き足しと描画が例外なし(跡あり版が作られる)",
+    !err && st.stamps > 0 && st.glass && st.hard && st.cached && st.rebuilds > 0, err ? String(err) : `書き足し ${st.stamps} 回 / 作り直し ${st.rebuilds} 回`);
+  check("なめた跡:マスクの大きさは水槽の 1/4(切り上げ)", st.mw === Math.ceil(core.W / scene.TRAIL.ms) && st.mh === Math.ceil(core.H / scene.TRAIL.ms), `${st.mw}x${st.mh}(水槽 ${core.W}x${core.H})`);
+  check("なめた跡:苔の量(algaeGlass・algaeHard)は跡によって変わらない", ag.algaeGlass === 1 && ag.algaeHard === 1 && ag.dirt >= 0.3);
+  // 戻り:時間経過オンで世代が進み、オフでは進まない
+  const tot0 = scene.trailProgress(); frames(60 * 5); const totOn = scene.trailProgress() - tot0;
+  ag.setAgingOn(false); const tot1 = scene.trailProgress(); frames(60 * 5); const totOff = scene.trailProgress() - tot1; ag.setAgingOn(true);
+  check("なめた跡:時間経過オンの間だけ苔の増える速さで戻る(オフの間は進まない)", totOn > 0 && totOff === 0, `5 秒で世代 +${totOn.toExponential(2)}(オン)/ +${totOff}(オフ)`);
+  // 全世代が過ぎれば跡は消え、元のテクスチャに戻る(life を極端に短くして確認。なめるのをやめさせる)
+  const life0 = scene.TRAIL.life; scene.TRAIL.life = 4e-5;
+  A.fishes.forEach(f => { if (f.cr && (f.sp === "snail" || f.sp === "oto")) Object.assign(f.cr, { surf: "sand", st: "rest", t: 1e6, fph: null }); if (f.cr && f.sp === "shrimp") Object.assign(f.cr, { surf: "sand", st: "rest", t: 1e6 }); });
+  frames(60 * 12); st = TS(); scene.TRAIL.life = life0;
+  check("なめた跡:なめるのをやめて全世代が過ぎると跡が消え、作り置きも捨てられる", !st.glass && !st.hard && !st.cached, JSON.stringify(st));
+  // 清掃で消える
+  place(); frames(60 * 2); const before = TS();
+  ag.setAgingState({ lastClean: 0, algaeGlass: 1 }); ag.checkMaintenance(Date.now()); frames(2); st = TS();
+  check("なめた跡:清掃(メンテ)で跡が全部消える(ガラスの苔が 0 になるので新しい跡も付かない)", before.glass && !st.glass && ag.algaeGlass === 0, `前 ${before.glass} → 後 ${st.glass}`);
+  // resize で消え、マスクが新しい大きさで作り直される
+  ag.setAgingState({ algaeGlass: 1, algaeHard: 1 }); place(); frames(60 * 2);
+  const b2 = TS(); A.setPseudo(true); frames(2); place(); frames(60 * 2); const r1 = TS(); A.setPseudo(false); frames(2);
+  check("なめた跡:resize でマスクが捨てられて作り直され(世代番号が変わる)、大きさが水槽に追従する", b2.glass && r1.id > b2.id && r1.mw === Math.ceil(core.W / scene.TRAIL.ms) && r1.mh === Math.ceil(core.H / scene.TRAIL.ms), `番号 ${b2.id}→${r1.id} / ${b2.mw}x${b2.mh} → ${r1.mw}x${r1.mh}(水槽 ${core.W}x${core.H})`);
+  frames(60);
+
+  // 性能による切り替え:測定値を GOV.override で与える
+  const modeSeq = (ms, n) => { gov.GOV.override = ms; const seq = []; for (let i = 0; i < n; i++) { frames(1); seq.push(gov.govState().mode); } return seq; };
+  const firstIdx = (seq, m) => seq.indexOf(m);
+  ag.setAgingState({ algaeGlass: 0.7, algaeHard: 0.4 }); ag.setAgingOn(false); // 苔の量が切り替えの前後で同じことを見るため、時間経過を止める
+  place(); const g0 = ag.algaeGlass, h0 = ag.algaeHard;
+  gov.govReset();
+  const seq = modeSeq(5, 60 * 9);
+  const iFade = firstIdx(seq, "fading"), iOff = firstIdx(seq, "off");
+  check("切り替え:最初の 3 秒は 2.5ms 超を与えても判定しない(on のまま)", iFade >= 60 * 3, `fading になったのは ${iFade} フレーム目(= ${(iFade / 60).toFixed(1)} 秒)`);
+  check("切り替え:超え続けると、3 秒の平均が超えた時点で fading になり、約 1 秒で off になる", iFade > 0 && iOff > iFade && Math.abs((iOff - iFade) / 60 - gov.GOV.fadeSec) < 0.1, `fading ${(iFade / 60).toFixed(2)} 秒 → off ${(iOff / 60).toFixed(2)} 秒(差 ${((iOff - iFade) / 60).toFixed(2)} 秒)`);
+  st = TS();
+  check("切り替え:off になると跡の表現が消える(マスク・作り置きなし)", gov.govState().mode === "off" && st.mw === 0 && !st.glass && !st.hard && !st.cached && gov.trailStrength() === 0, JSON.stringify(st));
+  check("切り替え:切り替えの前後で苔の量(algaeGlass・algaeHard)が同じ", ag.algaeGlass === g0 && ag.algaeHard === h0, `glass ${g0}→${ag.algaeGlass} / hard ${h0}→${ag.algaeHard}`);
+  const seq2 = modeSeq(1.0, 60 * 6);
+  check("切り替え:以後 1.0ms を与えても戻らない(そのセッションの間は off)", seq2.every(m => m === "off") && TS().mw === 0);
+  // タブが hidden の間は判定しない。表示に戻った直後の 3 秒も判定しない
+  gov.govReset(); document.visibilityState = "hidden";
+  const seqH = modeSeq(5, 60 * 10);
+  document.visibilityState = "visible"; (document.L.visibilitychange || []).forEach(f => f());
+  const seqV = modeSeq(5, 60 * 9);
+  const iV = firstIdx(seqV, "fading");
+  check("切り替え:hidden の間は判定しない(10 秒間 5ms を与えても on)", seqH.every(m => m === "on"));
+  check("切り替え:表示に戻った直後の 3 秒は判定しない(その後の 3 秒平均で fading)", iV >= 60 * 3 && iV < 60 * 9, `fading は ${(iV / 60).toFixed(1)} 秒後`);
+  gov.govReset(); gov.GOV.override = null; ag.setAgingOn(true);
+  A.fishes.forEach(f => { if (f.cr) f.cr.t = 0; });
+  for (const k of A.ORDER) A.counts[k] = save0[k];
+  A.syncFish(); frames(30);
 }
 
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて成功");

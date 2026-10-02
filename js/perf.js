@@ -1,5 +1,6 @@
 // 性能計測(?perf を付けて開いたときだけ有効)。描画・乱数・DOM には、有効時のオーバーレイ以外は触れない。
 // 使い方は README の「性能計測」を参照。無効時は PERF が false で、呼び出し側の if (PERF) が全て素通りする。
+import { govState } from "./governor.js";
 export const PERF = typeof location !== "undefined" && /[?&]perf(=|&|$)/.test(location.search || "");
 
 const N = 120;
@@ -46,5 +47,6 @@ export function perfReport(cv, dpr, fishCount){                          // 0.5 
   }
   const f = v => " " + v.toFixed(2).padStart(8);
   const rows = Object.keys(s).map(k => `${k.padEnd(11)}${f(s[k].avg)}${f(s[k].p95)}`);
-  el.textContent = `FPS ${fps.toFixed(1)}  fish ${fishCount}\ncanvas ${info.canvas}  dpr ${dpr}\n${"ms".padEnd(11)}${"avg".padStart(9)}${"p95".padStart(9)}\n` + rows.join("\n");
+  const gv = govState();
+  el.textContent = `FPS ${fps.toFixed(1)}  fish ${fishCount}\ncanvas ${info.canvas}  dpr ${dpr}\ntrail ${gv.mode}  3s avg ${gv.avg.toFixed(2)}ms (しきい値 2.5)\n${"ms".padEnd(11)}${"avg".padStart(9)}${"p95".padStart(9)}\n` + rows.join("\n");
 }

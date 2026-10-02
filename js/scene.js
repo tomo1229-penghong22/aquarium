@@ -1,6 +1,6 @@
 // 水槽の情景(配置・水草・光・水面・温度計・ガラス・エアストーン・泡)の生成と描画。
-import { DPR, H, TAU, Tw, U, W, clamp, ctx, current, lerp, mix, mulberry, nightT, noise1, sandY, waterTop } from "./core.js";
-import { DO, agingOn, algaeGlass, algaeHard, clog, dirt, growth } from "./aging.js";
+import { DPR, H, TAU, counts, Tw, U, W, clamp, ctx, current, lerp, mix, mulberry, nightT, noise1, sandY, waterTop } from "./core.js";
+import { DO, RATE, agingOn, algaeGlass, algaeHard, clog, dirt, glassMult, growth, hardMult, sinceClean } from "./aging.js";
 
 /* ---- 情景の状態(buildScene が作り直す) ---- */
 export let staticNight = null, staticLayer = null, plants = { back: [], mid: [], front: [] }, rocks = [];
@@ -459,7 +459,7 @@ function valueNoise(r, cw, ch){
 }
 function buildAging(){
   const r = mulberry(AG_SEED);
-  agTex = null;
+  agTex = null; tr = null; // テクスチャも跡も作り直し(resize)
   // 浮草の追加の葉(元の葉数の約 0.6 倍。成長に応じて先頭から使う)
   floats.forEach(fl => {
     fl.extra = [];
@@ -574,6 +574,97 @@ function ensureAging(){
   agTex = t;
   return t;
 }
+/* ---------------- なめた跡(案3:前面ガラスの貝・オトが通った跡、エビがつまんだ岩・流木の跡) ----------------
+   見た目だけの層。苔の量(状態)は変えない。跡は保存しない。
+   方式:低解像度(MS ピクセルに 1 ピクセル)の「跡マスク」キャンバスに、いまなめている位置を 0.2 秒ごとに丸く書き足す。
+   マスクは TRAIL.gens 枚の世代(キャンバス)に分け、世代ごとに「年齢」で透明度を変えて苔のテクスチャへ destination-out で重ねた
+   「跡あり版」を 0.2 秒ごとに作り置きし、drawAgingGlass / drawAgingHard はそれがあれば使う(毎フレームの追加コストなし。getImageData / putImageData は使わない)。
+   戻り方:世代の進みは「苔の増える速さ」に比例(dt × glassMult または hardMult / RATE ÷ 世代数 × TRAIL.life)。時間経過がオフの間は進まない。
+   全世代が過ぎると跡は消える。清掃・リセット(苔の状態が下がる)・resize・?aging・性能による切り替え(off)で全部捨てる。 */
+export const TRAIL = { ms: 4, gens: 6, life: 0.15, stampSec: 0.2, rebuildSec: 0.2, radius: 1.0 };
+let tr = null, trSeq = 0; // { glass, hard: { b: [{c,g}], head, prog, any, quiet } , acc, since, prevSince, prevG, prevH, cache: { gA, gB, h: [] }, mw, mh }
+function newMask(mw, mh, any = false){ const b = []; for (let i = 0; i < TRAIL.gens; i++) { const [c, g] = mkCanvas(mw, mh); b.push({ c, g }); } return { b, head: 0, prog: 0, any, quiet: 0, tot: 0 }; }
+export function resetTrails(){ tr = null; }
+export const trailProgress = () => tr ? tr.glass.tot : 0; // 世代の累計(戻りの進み。テスト用)
+export function trailState(){ return { mw: tr ? tr.mw : 0, mh: tr ? tr.mh : 0, glass: !!(tr && tr.glass.any), hard: !!(tr && tr.hard.any), cached: !!(tr && tr.cache.gA), stamps: tr ? tr.stamps : 0, rebuilds: tr ? tr.rebuilds : 0, id: tr ? tr.id : 0 }; }
+function ensureTrail(){
+  if (tr) return tr;
+  const mw = Math.max(1, Math.ceil(W / TRAIL.ms)), mh = Math.max(1, Math.ceil(H / TRAIL.ms));
+  tr = { glass: newMask(mw, mh), hard: newMask(mw, mh), acc: 0, since: 0, prevSince: -1, prevG: algaeGlass, prevH: algaeHard, cache: { gA: null, gB: null, h: [] }, mw, mh, stamps: 0, rebuilds: 0, dirty: false, id: ++trSeq };
+  return tr;
+}
+function stamp(m, x, y, r){
+  const g = m.b[m.head].g;
+  g.fillStyle = "rgba(0,0,0,0.95)"; g.beginPath(); g.arc(x / TRAIL.ms, y / TRAIL.ms, Math.max(1, r * TRAIL.radius / TRAIL.ms), 0, TAU); g.fill();
+  m.any = true; m.quiet = 0;
+}
+function advance(m, gensStep){
+  if (!m.any) return;
+  m.prog += gensStep; m.tot += gensStep;
+  while (m.prog >= 1) {
+    m.prog -= 1; m.head = (m.head + 1) % TRAIL.gens; m.b[m.head].g.clearRect(0, 0, m.b[m.head].c.width, m.b[m.head].c.height);
+    if (++m.quiet >= TRAIL.gens) { m.any = false; m.prog = 0; tr.dirty = true; }
+  }
+}
+// マスクの世代を、年齢に応じた透明度(fade:性能による消去の強さ)で srcCanvas に destination-out で重ねた「跡あり版」を作る
+function applyMask(g, m, sx, sy, sw, sh, w, h, fade){
+  g.globalCompositeOperation = "destination-out";
+  for (let i = 0; i < TRAIL.gens; i++) {
+    const age = (m.head - i + TRAIL.gens) % TRAIL.gens, wgt = clamp(1 - (age + m.prog) / TRAIL.gens, 0, 1) * fade;
+    if (wgt < 0.01) continue;
+    g.globalAlpha = wgt; g.drawImage(m.b[i].c, sx, sy, sw, sh, 0, 0, w, h);
+  }
+  g.globalAlpha = 1; g.globalCompositeOperation = "source-over";
+}
+function rebuildTrails(fade){
+  const t = ensureAging(), c = tr.cache; tr.rebuilds++;
+  if (tr.glass.any && t.algaeA) {
+    const w = t.algaeA.width, h = t.algaeA.height;
+    if (!c.gA) { const [a, ga] = mkCanvas(w, h), [b, gb] = mkCanvas(w, h); c.gA = { c: a, g: ga }; c.gB = { c: b, g: gb }; }
+    [[c.gA, t.algaeA], [c.gB, t.algaeB]].forEach(([d, src]) => { d.g.globalCompositeOperation = "source-over"; d.g.clearRect(0, 0, w, h); d.g.drawImage(src, 0, 0); applyMask(d.g, tr.glass, 0, 0, tr.mw, tr.mh, w, h, fade); });
+  } else { c.gA = c.gB = null; }
+  if (tr.hard.any && agData.box && t.hard.length) {
+    const B = agData.box;
+    t.hard.forEach((src, i) => {
+      const w = src.width, h = src.height;
+      if (!c.h[i]) { const [cc, gg] = mkCanvas(w, h); c.h[i] = { c: cc, g: gg }; }
+      const d = c.h[i]; d.g.globalCompositeOperation = "source-over"; d.g.clearRect(0, 0, w, h); d.g.drawImage(src, 0, 0);
+      applyMask(d.g, tr.hard, B.x / TRAIL.ms, B.y / TRAIL.ms, B.w / TRAIL.ms, B.h / TRAIL.ms, w, h, fade);
+    });
+  } else c.h = [];
+  tr.dirty = false; tr.since = 0;
+}
+/* 毎フレーム。graz:crawlers.grazers() の結果(新種がいなければ空)。strength:trailStrength()(0 なら跡の表現は使わない) */
+export function updateTrails(dt, graz, strength){
+  if (strength <= 0) { if (tr) tr = null; return; }
+  // 清掃・リセット・?aging などで苔の状態が下がったら、跡は全部消す
+  if (tr && (sinceClean < tr.prevSince - 1e-6 || algaeGlass < tr.prevG - 0.001 || algaeHard < tr.prevH - 0.001)) tr = null;
+  if (!tr) {
+    if (!graz.length) { return; }
+    // なめる対象の苔がない(新品)間は何も作らない
+    if (!graz.some(g => g.active && (g.kind === "glassF" ? algaeGlass >= AG_EPS : algaeHard >= AG_EPS))) return;
+    ensureTrail();
+  }
+  tr.prevSince = sinceClean; tr.prevG = algaeGlass; tr.prevH = algaeHard;
+  tr.acc += dt; tr.since += dt;
+  if (tr.acc >= TRAIL.stampSec) {
+    tr.acc = 0;
+    for (const g of graz) {
+      if (!g.active) continue;
+      if (g.kind === "glassF" && algaeGlass >= AG_EPS) { stamp(tr.glass, g.x, g.y, g.r); tr.stamps++; tr.dirty = true; }
+      else if (g.kind === "hard" && algaeHard >= AG_EPS) { stamp(tr.hard, g.x, g.y, g.r); tr.stamps++; tr.dirty = true; }
+    }
+  }
+  if (agingOn) {
+    advance(tr.glass, dt * glassMult(counts) / (TRAIL.life * RATE.glassRiseSec) * TRAIL.gens);
+    advance(tr.hard, dt * hardMult(counts) / (TRAIL.life * RATE.hardSec) * TRAIL.gens);
+  }
+  const any = tr.glass.any || tr.hard.any;
+  if (!any) { if (tr.cache.gA || tr.cache.h.length) { tr.cache = { gA: null, gB: null, h: [] }; } return; }
+  // 作り置きの更新:書き足しがあったとき 0.2 秒ごと(消去中は 0.1 秒ごと)、なくても 2 秒ごと(戻りの反映)
+  const every = strength < 1 ? TRAIL.rebuildSec / 2 : TRAIL.rebuildSec;
+  if ((tr.dirty && tr.since >= every) || tr.since >= 2 || (strength < 1 && tr.since >= every) || (!tr.cache.gA && !tr.cache.h.length)) rebuildTrails(strength);
+}
 // ガラスの汚れ・苔(水面の後、色調補正の前に呼ぶ:照明の色調がかかる)。水中部分(waterTop〜H)だけ
 export function drawAgingGlass(){
   const dOn = dirt >= AG_EPS, aOn = algaeGlass >= AG_EPS;
@@ -584,9 +675,9 @@ export function drawAgingGlass(){
     ctx.globalAlpha = a0 * dirt * 0.09; ctx.fillStyle = "rgb(236,240,226)"; ctx.fillRect(0, waterTop, W, h); // わずかな白濁
   }
   if (aOn) {
-    ctx.globalAlpha = a0 * 0.85 * clamp(algaeGlass * 2.2, 0, 1); ctx.drawImage(t.algaeA, 0, 0, W, H);
+    ctx.globalAlpha = a0 * 0.85 * clamp(algaeGlass * 2.2, 0, 1); ctx.drawImage(tr && tr.cache.gA ? tr.cache.gA.c : t.algaeA, 0, 0, W, H);
     const b = clamp((algaeGlass - 0.25) / 0.75, 0, 1);
-    if (b >= AG_EPS) { ctx.globalAlpha = a0 * 0.85 * b; ctx.drawImage(t.algaeB, 0, 0, W, H); }
+    if (b >= AG_EPS) { ctx.globalAlpha = a0 * 0.85 * b; ctx.drawImage(tr && tr.cache.gB ? tr.cache.gB.c : t.algaeB, 0, 0, W, H); }
   }
   ctx.globalAlpha = a0;
 }
@@ -597,7 +688,7 @@ export function drawAgingHard(){
   for (let b = 0; b < 3; b++) {
     const al = clamp(algaeHard * 3 - b, 0, 1);
     if (al < AG_EPS || !t.hard[b]) continue;
-    ctx.globalAlpha = a0 * al; ctx.drawImage(t.hard[b], B.x, B.y, B.w, B.h);
+    ctx.globalAlpha = a0 * al; ctx.drawImage(tr && tr.cache.h[b] ? tr.cache.h[b].c : t.hard[b], B.x, B.y, B.w, B.h);
   }
   ctx.globalAlpha = a0;
 }
