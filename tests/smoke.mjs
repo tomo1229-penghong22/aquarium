@@ -273,13 +273,13 @@ for (const sp of A.ORDER) {
   const S = A.SPECIES.neon, hyp = v => beh.effectiveZone(S, v);
   const prevT = A.getT();
   A.setT(25); frames(60 * 10); // Tw を 25 に落ち着かせる
-  const z0 = hyp(0), z1 = hyp(1), zh = hyp(0.5), zDef = beh.effectiveZone(S);
+  const bz = beh.baseZone(S), z0 = hyp(0), z1 = hyp(1), zh = hyp(0.5), zDef = beh.effectiveZone(S);
   const bMax = Math.max(...A.ORDER.map(k => beh.effectiveZone(A.SPECIES[k], 1)[1]));
   A.setTimeScale(20); A.setT(34); frames(60 * 30);
   const zHot = hyp(0); // 34℃(暑さ最大)での値
   A.setTimeScale(1);
-  check("effectiveZone:25℃で hypoxia=0 は従来(種の既定)と同じ・既定引数は現在の DO、hypoxia=1 は 34℃ と同じ水面寄り",
-    Math.abs(core.Tw - 34) < 0.05 && z0[0] === S.zone[0] && z0[1] === S.zone[1] && zDef[0] === z0[0] && zDef[1] === z0[1]
+  check("effectiveZone:25℃で hypoxia=0 は種の層を広げたもの(baseZone)と同じ・既定引数は現在の DO、hypoxia=1 は 34℃ と同じ水面寄り",
+    Math.abs(core.Tw - 34) < 0.05 && z0[0] === bz[0] && z0[1] === bz[1] && bz[0] < S.zone[0] && bz[1] > S.zone[1] && bz[1] <= 0.95 && zDef[0] === z0[0] && zDef[1] === z0[1]
       && z1[0] === zHot[0] && z1[1] === zHot[1] && z1[0] <= 0.16 && zh[1] < z0[1] && zh[1] > z1[1],
     `hyp0 [${z0.map(v => v.toFixed(3))}] / hyp0.5 [${zh.map(v => v.toFixed(3))}] / hyp1 [${z1.map(v => v.toFixed(3))}] / 全種 hyp1 の下端 最大 ${bMax.toFixed(3)}`);
   const savedDO = ag.DO;

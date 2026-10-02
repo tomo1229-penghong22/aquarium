@@ -14,7 +14,7 @@
 | `js/core.js` | ユーティリティ(`TAU`、`clamp`、`lerp`、`mulberry`、`noise1`、`mix`)、`W` `H` `U` `DPR` `waterTop`、`ctx`、`Tset` `Tw` `timeScale` `nightOn` `nightT`、`counts`、保存と復元、`sandY` `bottomY` `current`、セッター |
 | `js/aging.js` | 時間経過の状態モデル(汚れ・苔・目詰まり・水草の成長・溶存酸素・メンテ・日の出日没)。`agingOn`、`dirt` `algaeGlass` `algaeHard` `clog` `growth` `DO` `lastClean` `lastFilter` `sinceClean`、`updateAging`、`checkMaintenance`、`onVisibility`、`DOsat` `hypoxia` `DOeq`、`sunTimes` `lightPhase` `autoLightStep`、`noticeMessage`。トップレベルで乱数・Canvas・`Date` を使わない |
 | `js/fish-render.js` | 描画ヘルパ、`BASE_A`、`EYE`、`PAINT`、`drawFish` |
-| `js/fish-behavior.js` | `fishes`、`schools`、`makeFish`、`syncFish`、`updateHealth`、`updateSchools`、`updateFish` |
+| `js/fish-behavior.js` | `fishes`、`schools`、`makeFish`、`syncFish`、`baseZone`(種の層を上下に広げる)、`effectiveZone`、`updateHealth`、`updateSchools`、`updateFish` |
 | `js/scene.js` | `buildScene`、`makeStatic`、水草・流木・岩・浮草の描画、時間経過の見た目(`buildAging`・`ensureAging`・`drawAgingGlass`・`drawAgingHard`)、コースティクス・光の筋・水面(光の素材は `buildLight` で作り置き)、温度計、24時間計(`clockHourAngle`、`drawClock`、位置を返す `clockGeom`。オフのときはグレー表示)、酸素メーター(`o2NeedleAngle`、`drawO2Meter`、`meterGeom`、作り置きの `buildMeter`)、LED・色調補正・ガラス、エアストーン・泡・粒子 |
 | `js/popup.js` | 拡大ポップアップ(`P`、`startAct`、`updatePop`、`drawPop`、`openPop` / `closePop`) |
 | `js/ui.js` | パネル、全画面表示、`updatePanel`、時計ボタン(`layoutClockBtn`)・照明の自動化(`autoLightTick`)・メンテの案内(`showNoticeIfAny`)・水槽のリセット |

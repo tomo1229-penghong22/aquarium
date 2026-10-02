@@ -8,6 +8,19 @@ import { DO, hypoxia } from "./aging.js";
 const SCHOOL_VSPREAD = 1.0; // 目標位置の縦の散らばり(従来 0.6)
 const SCHOOL_FORE = 1.3;  // 進行方向の前後で分離が効く距離の倍率(1 で従来どおり円形)
 
+/* 水槽いっぱいに泳ぐための範囲。種の生息層 zone は傾向として残し、上下に広げて使う(下の baseZone)。
+   横は体が端からはみ出さないよう、体長に応じた余白(体長 × X_MARGIN_L か、幅の X_MARGIN_W の大きいほう)を取る */
+const X_MARGIN_W = 0.02, X_MARGIN_L = 0.6; // 個体の目標・初期位置の横の余白
+const SCHOOL_X = [0.05, 0.95];             // 群れの中心の横の範囲(幅に対する比)
+const LOOSE_PULL = 0.15;                   // 群れ度 0.5 以下の種:群れの中心へ引かれる強さの倍率(1 だと範囲の端へ行けない)
+const ARRIVE_L = 0.3;                      // 目標に着いたとみなす距離(体長の倍率。従来 1.2。大きいと端の目標の手前で切り替わり、端まで行けない)
+const WALL_L = 0.6;                        // 壁の反発が始まる距離(体長の倍率。従来 1.2)
+const CENTER_V = 1.0;                      // 群れの中心の最高速度(種の速さの倍率)
+const TRAVEL_K = 0.6;                      // 目標へ着くまでの見込み時間 = 距離 / (種の速さ × この倍率)。次の目標へ切り替えるまでの下限(途中で切り替えると端まで行けない)
+const ZONE_UP = 0.3, ZONE_DOWN = 0.75;     // 層の広げ方:a' = 0.3a、b' = b + 0.75(0.95 − b)
+function xRange(L){ const m = Math.max(X_MARGIN_W * W, L * X_MARGIN_L); return [m, W - m]; }
+function randX(L){ const [lo, hi] = xRange(L); return lo + Math.random() * (hi - lo); }
+
 /* ---------------- 魚の生成 ---------------- */
 export const fishes = [];
 export const schools = {};
@@ -17,9 +30,15 @@ ORDER.forEach(k => schools[k] = { x: 0, y: 0, cx: 0, cy: 0, timer: 0 });
 const HYPOXIA_DO = 3.0, HYPOXIA_K = 0.0075;
 
 /* hyp:低酸素係数(既定は現在の DO から)。水面へ寄る強さは、暑さ係数と低酸素係数の大きいほう(水面呼吸) */
+/* 種の生息層を広げたもの(コリドラスは底のまま) */
+export function baseZone(S){
+  const [a, b] = S.zone;
+  if (S === SPECIES.cory) return [a, b];
+  return [a * ZONE_UP, b + ZONE_DOWN * (0.95 - b)];
+}
 export function effectiveZone(S, hyp = hypoxia(DO)){
   const cold = clamp((23 - Tw) / 5, 0, 1), hot = Math.max(clamp((Tw - 29) / 4, 0, 1), hyp);
-  let a = S.zone[0], b = S.zone[1];
+  let [a, b] = baseZone(S);
   a = lerp(a, 0.55, cold * 0.6); b = lerp(b, 0.95, cold * 0.6);
   a = lerp(a, 0.0, hot * 0.9); b = lerp(b, 0.16, hot * 0.9);
   return [a, b];
@@ -29,8 +48,8 @@ function zoneY(x, frac, z){ return waterTop + 20 * U + frac * (bottomY(x, z) - w
 export function makeFish(sp){
   const S = SPECIES[sp];
   const z = Math.random();
-  const x = W * (0.1 + Math.random() * 0.8);
-  const zn = S.zone;
+  const x = randX(S.len * U * 1.1); // 体長は最大(scale 1.12)に近い値で余白を取る
+  const zn = baseZone(S);
   const y = sp === "cory" ? bottomY(x, z) - 10 * U : zoneY(x, lerp(zn[0], zn[1], Math.random()), z);
   const f = { sp, x, y, z, zt: z, vx: (Math.random() - 0.5) * 20 * U, vy: 0, flip: Math.random() < 0.5 ? 1 : -1, pitch: 0, tilt: 0,
     phase: Math.random() * TAU, health: 1, hardy: 0.85 + Math.random() * 0.3, scale: 0.88 + Math.random() * 0.24,
@@ -72,12 +91,14 @@ export function updateHealth(f, dt){
   f.pale = clamp((0.85 - f.health) * 1.1, 0, 0.85);
 }
 
+function schoolSpread(n){ return (40 + Math.sqrt(n) * 22) * U; }
 function pickTarget(f){
   const S = SPECIES[f.sp];
   const zn = effectiveZone(S);
-  f.tx = W * (0.07 + Math.random() * 0.86);
+  f.tx = randX(S.len * U * f.scale);
   f.ty = zoneY(f.tx, lerp(zn[0], zn[1], Math.random()), f.z);
   f.tTimer = (f.sp === "angel" ? 5 : 2.5) + Math.random() * 5;
+  f.tTimer = Math.max(f.tTimer, Math.hypot(f.tx - f.x, f.ty - f.y) / (S.speed * U * TRAVEL_K));
   if (Math.random() < 0.25) f.zt = Math.random();
 }
 
@@ -87,13 +108,16 @@ export function updateSchools(dt){
     s.timer -= dt;
     if (s.timer <= 0) {
       const zn = effectiveZone(S);
-      s.x = W * (0.15 + Math.random() * 0.7);
+      s.x = W * (SCHOOL_X[0] + Math.random() * (SCHOOL_X[1] - SCHOOL_X[0]));
       s.y = zoneY(s.x, lerp(zn[0], zn[1], Math.random()), 0.5);
       s.timer = 4 + Math.random() * 6;
       if (!s.cx) { s.cx = s.x; s.cy = s.y; }
     }
-    s.cx += (s.x - s.cx) * Math.min(1, dt * 0.35);
-    s.cy += (s.y - s.cy) * Math.min(1, dt * 0.35);
+    // 群れの中心は魚の速さより速く動かさない(離れた目標へ速く動くと、魚が追いつくまで群れが引き伸ばされ、追いつくときに詰まる)
+    const vmax = S.speed * U * CENTER_V * dt;
+    const mx = (s.x - s.cx) * Math.min(1, dt * 0.35), my = (s.y - s.cy) * Math.min(1, dt * 0.35), mh = Math.hypot(mx, my);
+    const k = mh > vmax ? vmax / mh : 1;
+    s.cx += mx * k; s.cy += my * k;
   });
 }
 
@@ -119,21 +143,22 @@ export function updateFish(f, dt){
         if (rnd < airP && f.health > 0.25) { f.state = "air"; f.tx = f.x + (Math.random() - 0.5) * 120 * U; }
         else if (rnd < 0.45) { f.state = "rest"; f.stateT = 2 + Math.random() * 4; }
         else { f.state = "forage"; f.stateT = 3 + Math.random() * 5;
-          const sc = schools.cory; f.tx = clamp(lerp(f.x + (Math.random() - 0.5) * 320 * U, sc.cx, S.school), 50 * U, W - 50 * U); }
+          const sc = schools.cory; f.tx = lerp(f.x + (Math.random() - 0.5) * 320 * U, sc.cx, S.school); }
       }
       tx = f.state === "rest" ? f.x : f.tx; ty = floorY;
       speed *= f.state === "rest" ? 0.05 : 0.55;
     }
-    tx = clamp(tx, 40 * U, W - 40 * U);
+    { const [lo, hi] = xRange(L); tx = clamp(tx, lo, hi); }
   } else {
     f.tTimer -= dt;
-    if (f.tTimer <= 0 || Math.hypot(f.tx - f.x, f.ty - f.y) < L * 1.2) pickTarget(f);
+    if (f.tTimer <= 0 || Math.hypot(f.tx - f.x, f.ty - f.y) < L * ARRIVE_L) pickTarget(f);
     const s = schools[f.sp];
     const n = counts[f.sp];
-    const spread = (40 + Math.sqrt(n) * 22) * U;
-    tx = lerp(f.tx, s.cx + f.ox * spread * 1.4, S.school);
+    const spread = schoolSpread(n);
+    const pull = S.school > 0.5 ? S.school : S.school * LOOSE_PULL;
+    tx = lerp(f.tx, s.cx + f.ox * spread * 1.4, pull);
     // 群れる種は縦の散らばりを大きくして、進行方向に細長い一列に見えないようにする(他の種は従来どおり 0.6)
-    ty = lerp(f.ty, s.cy + f.oy * spread * (S.school > 0.5 ? SCHOOL_VSPREAD : 0.6), S.school);
+    ty = lerp(f.ty, s.cy + f.oy * spread * (S.school > 0.5 ? SCHOOL_VSPREAD : 0.6), pull);
     // 高水温:水面へ。低水温:底寄りに沈みがち
     ty = lerp(ty, waterTop + (12 + Math.abs(f.oy) * 30) * U, hot * 0.85);
     if (f.health < 0.3) ty = lerp(ty, bottomY(f.x, f.z) - L * 0.5, (0.3 - f.health) / 0.3 * (hot > 0 ? 0.25 : 0.8));
@@ -169,7 +194,7 @@ export function updateFish(f, dt){
   if (an && S.school > 0.5) { desx = lerp(desx, alx / an, 0.25); desy = lerp(desy, aly / an, 0.25); }
 
   // 壁
-  const m = L * 1.2;
+  const m = L * WALL_L;
   if (f.x < m) desx += (m - f.x) * 3; if (f.x > W - m) desx -= (f.x - (W - m)) * 3;
 
   const accel = Math.min(1, dt * (1.2 + act));
