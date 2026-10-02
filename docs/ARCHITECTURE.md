@@ -196,9 +196,11 @@ loop(毎フレーム)
 ## 魚の描き方
 
 - `PAINT[種](L, wag, f)` が、原点を体の中心、頭を +x 方向として1匹を描く。
-- `drawFish(f)` が、位置・向き(`flip` の符号で左右反転、絶対値で振り向きの薄さ)・傾き(`pitch + tilt`)・透明度(`BASE_A = SPECIES.alpha`)を設定してから `PAINT` を呼ぶ。
+- `drawFish(f)` が、位置・向き(`flip` の符号で左右反転、絶対値で振り向きの薄さ)・傾き(`pitch + tilt`)・透明度(`BASE_A = SPECIES.finAlpha`:ひれ・膜、`BODY_A = 1`:体)を設定してから `PAINT` を呼ぶ。
 - 共通の部品:`bodyPath`、`forkTail`、`fanTail`、`fin`、`withTail`(尾の振りとしなり)、`shade`(上からの光・背中の艶・弱ったときの色あせ・縁の光)、`finRays`、`eye`、`pectoral`。
 - 使う変数は `f.phase`、`f.pale`、`f.health`、`f.spots`、`f.variant`、`f.ox`、`f.tailScale`(グッピーのみ)。
+- **透明度の規則**:体は不透明(`BODY_A`。ふだん 1。出現・消滅のフェードの間だけ下がる)、ひれ・尾の膜だけ半透明(`BASE_A` = `finAlpha` × フェード)。`PAINT` の中は `finOn()`(= `ctx.globalAlpha = BASE_A`)と `bodyOn()`(= `BODY_A`)で切り替える。尾(`withTail`)と胸びれ(`pectoral`)は自分で切り替える。体の奥のひれ・尾は体より先に描く(体で隠れる)。体の色むらは `globalAlpha` ではなく `rgba` で重ねる。`AUDIT.hook` は、切り替えのたびに種類("fin" / "finNear" / "body")をテストの監査へ知らせる(通常は `null` で何もしない)。奥行きの淡さは透明度ではなく、描画順で後から重なる霞の層が受け持つ。
+- **ヤマトヌマエビ**:`paintShrimpParts` が、共用のオフスクリーン(`shrimpBuffer`。全員で 1 枚。必要な大きさが増えたときだけ作り直す。毎フレームの生成なし)にすべて不透明で描き、メインの `ctx` には `BASE_A`(= `finAlpha` × フェード)で `drawImage` 1 回だけ出す。オフスクリーンの解像度は、そのときの変換の拡大率(`ctx.getTransform()`)に合わせる。`ctx` を一時的にオフスクリーンの `ctx` へ差し替えて描く(パネルのアイコン・ポップアップと同じ方法)。
 - お掃除生体の `PAINT`(`oto`・`shrimp`・`snail`)も横向き(頭が +x)。足元までの距離は `GROUND`(体長の倍率)。`drawCreature` が位置・角度・向き・透明度を設定して呼ぶ。エビは `f.pick`・`f.clawT`・`f.wash`・`f.hold`(前脚の動き)、貝は `f.hide`(殻に引っこむ度合い)を読む(ポップアップが設定する)。前面ガラスの貝は別の描画 `paintSnailFront`(足の裏と口)。
 
 ## 水草の揺れ
@@ -230,12 +232,13 @@ loop(毎フレーム)
 
 ## 確認手順
 
-1. `npm test`:ブラウザなしで実行時エラー・NaN・体調モデル・ポップアップの詰まり・餌を食べられるか・お掃除生体の動き(2 分間のシミュレーションを含む)・なめた跡と性能による切り替えを確かめる(所要 約 80 秒)。Canvas と DOM のモックをグローバルに置いてから `js/main.js` を import する方式で、内部状態には各モジュールの export 経由でアクセスする。
+1. `npm test`:ブラウザなしで(不透明化の「監査」を含む:`AUDIT.hook` で体・ひれの区間を記録用のコンテキストに知らせ、体の塗りの `globalAlpha` が 1、ひれの膜だけ半透明、エビは共用の 1 枚から 1 回だけ貼ることを確かめる)実行時エラー・NaN・体調モデル・ポップアップの詰まり・餌を食べられるか・お掃除生体の動き(2 分間のシミュレーションを含む)・なめた跡と性能による切り替えを確かめる(所要 約 80 秒)。Canvas と DOM のモックをグローバルに置いてから `js/main.js` を import する方式で、内部状態には各モジュールの export 経由でアクセスする。
    - 見た目を変えない変更(分割・整理など)では、`npm run drawlog` も実行する。描画命令の列を `tests/baseline/` の基準ログと比べ、一致すれば描画結果は同一(所要 約 40〜50 秒)。基準の `drawlog.log.gz` はリポジトリ外で、ハッシュ `drawlog.sha256` だけを管理する。
    - お掃除生体が入った現在の `npm run drawlog` は、基準ログ(新種なし)と一致しない(パネルに新種のアイコンが加わるため)。確認するときは、新種を ORDER から外し(`species.ORDER.length = 6`)、砂煙を切り(`scene.FX.puff = false`)、性能の測定を固定(`governor.GOV.override = 0`)したハーネスで比べる。基準の取り直しは、見た目を人間が了承した後に行う(`node tests/drawlog.mjs --record`)。
    - `drawlog` は 24時間計が現在時刻に依存するため、`TZ=UTC`・固定時刻 6:30(UTC)で実行する。実行環境のタイムゾーンや時刻に描画ログが左右されない。
    - 群れの形を確かめるときは `npm run school`。
-2. `npm run serve` → `http://localhost:8000/`:見た目と操作を確認する(`file://` では開けない)。チェックしたい点の例:
+2. 不透明化の画素確認:`npm run serve` → `http://localhost:8000/tests/pixels.html` を実際のブラウザで開く。魚 6 種・オト・エビ・貝を赤と緑の背景に描き、体の画素が背景に影響されない(差 ≤ 2/255)、ひれの膜は背景が見える、エビは背景がうっすら見えて重なりで濃くならない、貝の殻・足は不透明、を判定して表示する(結果は `window.__pixels`)。`sw.js` の `PRECACHE` には入れない(テスト用。`npm test` の検出は `js/`・`icons/`・manifest・`index.html` だけを見るので `tests/` は対象外)。
+3. `npm run serve` → `http://localhost:8000/`:見た目と操作を確認する(`file://` では開けない)。チェックしたい点の例:
    - 昼と夜の切り替え、18℃・25℃・34℃ での魚の様子
    - 各魚アイコンへのマウスオーバー(タッチ端末ではタップ)と、離したときに閉じること
    - 全画面の出入り(ボタン・F・ダブルクリック・Esc)、横長と縦長の画面

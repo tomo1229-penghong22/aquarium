@@ -2,7 +2,7 @@
 // main.js の resize を呼ぶため、main.js とは循環 import になる(関数の中でだけ使うので問題ない)。
 import { H, Tset, Tw, U, W, clamp, counts, ctx, cv, nightOn, save, setCtx, setNightOn, setTimeScale, setTset, setU, tankEl } from "./core.js";
 import { ORDER, SPECIES } from "./species.js";
-import { PAINT } from "./fish-render.js";
+import { PAINT, setBaseA } from "./fish-render.js";
 import { fishes, syncFish } from "./fish-behavior.js";
 import { P, bindPop, closePop } from "./popup.js";
 import { agingOn, autoLightStep, checkMaintenance, hasNotice, lastClean, lastFilter, noticeMessage, resetAging, setAgingOn, takeNotice } from "./aging.js";
@@ -39,11 +39,11 @@ ORDER.forEach(sp => {
   setU(prevU);
 });
 export function drawIcon(g, sp, L, f){
-  const orig = ctx; setCtx(g);
+  const orig = ctx; setCtx(g); setBaseA(SPECIES[sp].finAlpha); // ひれ・膜(エビは体全体)の透明度。体は不透明
   g.save(); g.translate(sp === "guppy" ? 70 : sp === "angel" ? 64 : 60, 30);
   PAINT[sp](L, 0, f);
   g.restore();
-  setCtx(orig);
+  setBaseA(1); setCtx(orig);
 }
 
 const tempEl = document.getElementById("temp");

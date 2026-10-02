@@ -279,6 +279,52 @@ for (const [sp, acts] of Object.entries(ACTS_NEW)) {
 }
 
 {
+  // 不透明化の監査(R1。画素は pixels.html で確かめる。ここは回帰防止):PAINT を記録用のコンテキストで走らせ、塗りの実効アルファを調べる
+  //   体は不透明(globalAlpha 1)、ひれ・尾の膜だけ半透明、体の奥のひれは体より先に描く、エビは 1 枚のオフスクリーンから 1 回だけ貼る
+  const fr = await imp("fish-render.js");
+  const PAINT_OPS = ["fill", "stroke", "fillRect", "strokeRect", "drawImage", "fillText"];
+  const record = (f, L, a = 1, front = false) => {
+    const st = { globalAlpha: 1 }, stack = [], ops = []; let tag = "none";
+    const rec = new Proxy({}, {
+      get(o, k) {
+        if (k === "save") return () => stack.push({ ...st });
+        if (k === "restore") return () => { const x = stack.pop(); if (x) Object.assign(st, x); };
+        if (PAINT_OPS.includes(k)) return (...args) => ops.push({ op: k, a: st.globalAlpha, tag, src: args[0], i: ops.length });
+        if (/^create/.test(k)) return () => ({ addColorStop() {} });
+        return k in st ? st[k] : () => {};
+      },
+      set(o, k, v) { st[k] = v; return true; },
+    });
+    const orig = core.ctx; core.setCtx(rec); fr.AUDIT.hook = t => { tag = t; };
+    try { front ? fr.drawSnailFront(f, L, 0, 0, 0, a) : fr.drawCreature(f, L, 0.1, 0, 0, 0, 1, a); } finally { fr.AUDIT.hook = null; core.setCtx(orig); }
+    return ops;
+  };
+  const mkf = (k, v = 0) => ({ sp: k, phase: 0.6, pale: 0, health: 1, spots: [[0.5, 0.2, 1], [0.7, -0.2, 1]], variant: v, ox: 0, tailScale: 1 });
+  const bad = [], info = [];
+  for (const [k, v] of [["neon", 0], ["rummy", 0], ["guppy", 0], ["platy", 0], ["angel", 0], ["angel", 1], ["cory", 0], ["oto", 0]]) {
+    const fa = A.SPECIES[k].finAlpha, ops = record(mkf(k, v), 100), name = `${k}${v ? v : ""}`;
+    const body = ops.filter(o => o.tag === "body"), far = ops.filter(o => o.tag === "fin"), near = ops.filter(o => o.tag === "finNear");
+    const firstBody = body.length ? body[0].i : Infinity;
+    if (!body.length || body.some(o => o.a !== 1)) bad.push(`${name}: 体の塗りが不透明でない(${body.map(o => o.a).filter(x => x !== 1)[0]})`);
+    if (!far.length || far.some(o => !(o.a < 1 && o.a <= fa + 1e-9))) bad.push(`${name}: ひれ・尾の膜が半透明でない`);
+    if (far.some(o => o.i > firstBody)) bad.push(`${name}: 体の奥のひれが体より後に描かれている(体で隠れない)`);
+    if (!near.length || near.some(o => o.i < firstBody || !(o.a < 1))) bad.push(`${name}: 胸びれが体の手前の半透明でない`);
+    if (ops.some(o => o.tag === "none")) bad.push(`${name}: 区間の目印のない塗りがある`);
+    // フェード(a = 0.5)の間は体も薄くなる(出現・消滅だけ)
+    const f2 = record(mkf(k, v), 100, 0.5).filter(o => o.tag === "body");
+    if (f2.some(o => Math.abs(o.a - 0.5) > 1e-9)) bad.push(`${name}: フェードで体が薄くならない`);
+    info.push(`${name} 体${body.length}/ひれ${far.length}+${near.length}`);
+  }
+  check("不透明化の監査:魚 6 種とオトは、体の塗りが globalAlpha 1、ひれ・尾の膜だけ半透明、体の奥のひれは体より先、胸びれは体の後", bad.length === 0, bad[0] || info.join(" "));
+  // 貝(横向き・前面ガラス)は全部不透明。エビは 1 枚のオフスクリーンから 1 回だけ半透明で貼る
+  const sn = record(mkf("snail"), 100), sf = record(mkf("snail"), 100, 1, true);
+  check("不透明化の監査:石巻貝(横向き・前面ガラス)の塗りはすべて globalAlpha 1", sn.length > 10 && sn.every(o => o.a === 1) && sf.length > 10 && sf.every(o => o.a === 1), `横向き ${sn.length} 命令 / 前面ガラス ${sf.length} 命令`);
+  const s1 = record(mkf("shrimp"), 100), s2 = record(mkf("shrimp"), 100), fa = A.SPECIES.shrimp.finAlpha;
+  check("不透明化の監査:ヤマトヌマエビは、メインの描画に 1 枚の drawImage(半透明 finAlpha)だけを出し、共用の同じオフスクリーンから貼る",
+    s1.length === 1 && s1[0].op === "drawImage" && Math.abs(s1[0].a - fa) < 1e-9 && s2.length === 1 && s1[0].src === s2[0].src && !!s1[0].src, `${s1.length} 命令(${s1.map(o => o.op)}) alpha ${s1[0]?.a}`);
+}
+
+{
   // sw.js の事前キャッシュのリストに、js/ の全 .js・icons/ の全 PNG・manifest が含まれていること
   const sw = readFileSync(join(root, "sw.js"), "utf8");
   const list = ((sw.match(/PRECACHE\s*=\s*\[([\s\S]*?)\]/) || [])[1] || "").match(/"[^"]+"/g)?.map(s => s.slice(1, -1).replace(/^\.\//, "")) ?? [];

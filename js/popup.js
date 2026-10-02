@@ -1,7 +1,7 @@
 // 魚アイコンにマウスを重ねたときの拡大ポップアップ(小さな水槽と仕草の状態機械)。
 import { TAU, U, clamp, ctx, lerp, mix, nightT, setCtx, setU } from "./core.js";
 import { NOTES, POP_L, SPECIES } from "./species.js";
-import { BASE_A, GROUND, PAINT, drawSnailFront, setBaseA, setEye } from "./fish-render.js";
+import { BODY_A, GROUND, PAINT, drawSnailFront, setBaseA, setBodyA, setEye } from "./fish-render.js";
 
 /* ---------------- 拡大ポップアップ ---------------- */
 const PW = 304, PH = 190;
@@ -301,13 +301,13 @@ function drawPopFish(x, y, flip, pitch, alpha){
   const L = P.L, dir = flip >= 0 ? 1 : -1;
   const wag = Math.sin(P.f.phase) * SPECIES[P.sp].wag * P.wagMul * (0.45 + 0.55 * P.effort);
   ctx.save();
-  setBaseA(alpha * SPECIES[P.sp].alpha); ctx.globalAlpha = BASE_A;
+  setBaseA(alpha * SPECIES[P.sp].finAlpha); setBodyA(alpha); ctx.globalAlpha = BODY_A; // 体は不透明(alpha はフェード・残像のときだけ 1 未満)
   ctx.translate(x + P.shake, y + (P.sp === "snail" || P.sp === "shrimp" ? 0 : Math.sin(P.t * 1.4) * 1.6));
   ctx.rotate((pitch + P.nod + P.spin) * dir);
   const sq = P.squash * 0.08;
   ctx.scale(dir * Math.max(0.1, Math.abs(flip)) * (1 - sq), 1 + sq);
   PAINT[P.sp](L, wag, P.f);
-  ctx.restore(); setBaseA(1);
+  ctx.restore(); setBaseA(1); setBodyA(1);
 }
 export function drawPop(){
   const oc = ctx, oU = U;

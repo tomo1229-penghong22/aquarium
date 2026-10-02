@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>不透明化の画素確認(R-B)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body{font:14px/1.5 system-ui,"Hiragino Sans",sans-serif;margin:16px;color:#222;background:#fafafa}
+  h1{font-size:18px;margin:0 0 4px} p{margin:4px 0}
+  table{border-collapse:collapse;margin:12px 0;width:100%;max-width:1100px}
+  td,th{border:1px solid #ccc;padding:3px 8px;text-align:left;vertical-align:top}
+  th{background:#eee}
+  .ok{color:#0a7a2f;font-weight:700} .ng{color:#c0261b;font-weight:700}
+  #summary{font-size:16px;font-weight:700;margin:8px 0}
+  .views{display:flex;flex-wrap:wrap;gap:12px}
+  .view{background:#fff;border:1px solid #ccc;padding:4px}
+  .view canvas{display:block;image-rendering:pixelated}
+  .view b{display:block;font-size:12px}
+  small{color:#666}
+</style>
+</head>
+<body>
+<h1>不透明化の画素確認(R-B)</h1>
+<p>実際のブラウザの Canvas で、魚 6 種・オト・エビ・貝(横向き・前面ガラス)を、赤と緑の 2 通りの背景に描いて画素を比べます。
+   <code>npm run serve</code> → <code>http://localhost:8000/tests/pixels.html</code> で開きます(外部リソースなし。<code>js/</code> のモジュールを import するだけ)。</p>
+<p><small>背景 赤 = (220,40,40)、緑 = (40,200,40)。画素の差 Δ は 0〜255 の値の差。不透明度の推定値 α = 1 − (赤背景の画素 − 緑背景の画素) / (背景の差)(R と G チャンネルの平均)。
+   プローブ(判定する画素)は、PAINT の形から決めた位置で、下の図に印を付けています(青 = 体、マゼンタ = ひれの膜、橙 = エビの重なり、水色 = エビの重ならない体)。</small></p>
+<div id="summary">実行中…</div>
+<table id="res"><thead><tr><th>項目</th><th>判定</th><th>測った値</th></tr></thead><tbody></tbody></table>
+<h2 style="font-size:15px">印つきの図(緑の背景、2 倍表示)</h2>
+<div class="views" id="views"></div>
+
+<!-- js/core.js が #tank とその親を読み込み時に探すためのもの(表示しない) -->
+<div style="display:none"><div><canvas id="tank"></canvas></div></div>
+
+<script type="module">
+import * as core from "../js/core.js";
+import { drawCreature, drawSnailFront } from "../js/fish-render.js";
+import { SPECIES } from "../js/species.js";
+
+/* ---------------- 設定 ---------------- */
+const CW = 340, CH = 200, CX = 190, CY = 100;           // 描く小さなキャンバスと、体の中心
+const RED = [220, 40, 40], GREEN = [40, 200, 40];
+const css = c => `rgb(${c[0]},${c[1]},${c[2]})`;
+const TOL_BODY = 2;        // 不透明な体:2 つの背景での画素の差(各チャンネル)の上限(/255)
+const MIN_FIN = 10;        // ひれの膜:差の下限(背景が見えている)
+const TOL_ALPHA = 0.04;    // エビ:不透明度の推定値が finAlpha から外れてよい幅
+const TOL_OVERLAP = 0.03;  // エビ:重なる画素の不透明度の推定値が、重ならない画素より大きくてよい幅(誤差の範囲)
+core.setU(1.5);
+
+const sp = k => ({ sp: k, phase: 0, pale: 0, health: 1, spots: [[0.5, 0.2, 1], [0.7, -0.2, 1], [0.8, 0.1, 1]], variant: 0, ox: 0, tailScale: 1, pick: 0, wash: 0, hold: 0, hide: 0, clawT: 0 });
+
+/* プローブ:[x(L の倍率), y(L の倍率), 名前]。体は不透明な所、ひれはひれの膜だけの所(体と重ならない所) */
+const FISH = {
+  neon:  { L: 110, body: [[0, -0.04], [-0.2, -0.03], [0.15, -0.04]], fin: [[-0.75, -0.076, "尾"], [-0.12, -0.167, "背びれ"]] },
+  rummy: { L: 110, body: [[0, -0.04], [-0.2, -0.03], [0.15, -0.04]], fin: [[-0.765, -0.077, "尾"], [-0.1, -0.16, "背びれ"]] },
+  guppy: { L: 90,  body: [[0, -0.05], [-0.2, -0.04], [0.15, -0.05]], fin: [[-0.96, 0, "尾"], [-0.25, -0.2, "背びれ"]] },
+  platy: { L: 110, body: [[0, -0.08], [-0.15, -0.07], [0.15, -0.08]], fin: [[-0.64, 0, "尾"], [-0.13, -0.25, "背びれ"]] },
+  angel: { L: 60,  body: [[0, -0.2], [-0.2, -0.15], [0.2, -0.25]], fin: [[-0.67, 0, "尾"], [-0.33, -0.55, "背びれ"]] },
+  cory:  { L: 110, body: [[0, -0.06], [-0.15, -0.05], [0.1, -0.06]], fin: [[-0.705, -0.106, "尾"], [-0.05, -0.31, "背びれ"]] },
+  oto:   { L: 110, body: [[0, -0.03], [-0.2, -0.02], [0.15, -0.03]], fin: [[-0.66, -0.06, "尾"], [-0.05, -0.13, "背びれ"]] },
+};
+const SHRIMP = { L: 120,
+  body: [[0.3, 0.09, "頭胸部(重ならない)"], [-0.08, -0.04, "腹部の節(重ならない)"]],
+  overlap: [[0.2, 0.09, "歩脚と頭胸部"], [-0.04, -0.04, "腹部の節どうし"], [0.429, 0.0293, "はさみと頭胸部", "wash"]] }; // はさみは、顔を洗う姿勢(wash = 1)で付け根から目のあたりへ上がり、頭胸部の内側を通る(付け根(0.4, 0.07)→(0.458, -0.011) の中点。頭胸部の楕円の内側で、縁から十分離れている)
+const SNAIL = { L: 100, body: [[-0.1, -0.12, "殻"], [0.3, 0.2, "足"], [0.46, 0.15, "頭"]] };
+const FRONT = { L: 110, rx: 0.56, ry: 0.36, // 前面ガラスの貝(足の裏と口)。位置は rx, ry の倍率
+  body: [[0.0, 0.0, "足の裏の中心"], [0.3, 0.4, "足の裏(縁寄り)"], [0.8, 0.0, "頭"], [-1.04, 0.0, "殻の縁(後ろ)", "shell"], [-0.42, -1.0, "殻の縁(上)", "shell"]] };
+
+/* ---------------- 描画と画素 ---------------- */
+function renderOn(bg, draw){
+  const c = document.createElement("canvas"); c.width = CW; c.height = CH;
+  const g = c.getContext("2d", { willReadFrequently: true });
+  g.fillStyle = css(bg); g.fillRect(0, 0, CW, CH);
+  const orig = core.ctx; core.setCtx(g);
+  try { draw(); } finally { core.setCtx(orig); }
+  return { c, g };
+}
+const px = (g, x, y) => Array.from(g.getImageData(Math.round(x), Math.round(y), 1, 1).data.slice(0, 3));
+function blockMaxDiff(gR, gG, x, y){ // 3x3 の画素の、2 つの背景での差の最大(各チャンネル)
+  const a = gR.getImageData(Math.round(x) - 1, Math.round(y) - 1, 3, 3).data, b = gG.getImageData(Math.round(x) - 1, Math.round(y) - 1, 3, 3).data;
+  let m = 0; for (let i = 0; i < a.length; i += 4) for (let k = 0; k < 3; k++) m = Math.max(m, Math.abs(a[i + k] - b[i + k]));
+  return m;
+}
+function alphaEst(gR, gG, x, y){ // 不透明度の推定:画素 = a·C + (1−a)·背景 なので、背景を変えたときの差から a が分かる
+  const r = px(gR, x, y), g = px(gG, x, y);
+  const aR = 1 - (r[0] - g[0]) / (RED[0] - GREEN[0]), aG = 1 - (r[1] - g[1]) / (RED[1] - GREEN[1]);
+  return (aR + aG) / 2;
+}
+
+const results = [], marks = [];  // marks: { title, canvas(緑背景), pts: [{x,y,kind,label}] }
+const add = (name, ok, value) => results.push({ name, ok: !!ok, value });
+
+function checkCreature(title, key, draw, spec, kind){
+  const R = renderOn(RED, draw), G = renderOn(GREEN, draw);
+  const pts = [];
+  (spec.body || []).forEach(([x, y, label]) => {
+    const X = CX + x * spec.L, Y = CY + y * spec.L, d = blockMaxDiff(R.g, G.g, X, Y);
+    pts.push({ x: X, y: Y, kind: "body", label: label || "体" });
+    add(`${title}:体 ${label || `(${x}, ${y})`} は背景に影響されない(差 ≤ ${TOL_BODY}/255)`, d <= TOL_BODY, `差 ${d}`);
+  });
+  (spec.fin || []).forEach(([x, y, label]) => {
+    const X = CX + x * spec.L, Y = CY + y * spec.L, d = blockMaxDiff(R.g, G.g, X, Y), c = Math.max(...px(R.g, X, Y).map((v, i) => Math.abs(v - px(G.g, X, Y)[i])));
+    pts.push({ x: X, y: Y, kind: "fin", label });
+    add(`${title}:ひれの膜(${label})は背景が見える(差 ≥ ${MIN_FIN}/255)`, c >= MIN_FIN, `差 ${c}(3x3 の最大 ${d})`);
+  });
+  marks.push({ title, canvas: G.c, pts });
+  return { R, G };
+}
+
+/* ---- 魚 6 種とオト ---- */
+const place = (f, L, a = 1) => () => drawCreature(f, L, 0, CX, CY, 0, 1, a);
+for (const k of Object.keys(FISH)) {
+  const spec = FISH[k], f = sp(k);
+  checkCreature(SPECIES[k].name, k, place(f, spec.L), spec);
+}
+// 体調が悪い(pale)魚も体は不透明
+{
+  const f = sp("neon"); f.pale = 0.6;
+  checkCreature("ネオンテトラ(体調悪化 pale 0.6)", "neon-pale", place(f, FISH.neon.L), { L: FISH.neon.L, body: FISH.neon.body, fin: [] });
+}
+
+/* ---- ヤマトヌマエビ(体が実際に半透明。1 匹を 1 枚の半透明の物体として貼る) ---- */
+{
+  const f = sp("shrimp"), draw = place(f, SHRIMP.L), R = renderOn(RED, draw), G = renderOn(GREEN, draw), fa = SPECIES.shrimp.finAlpha, pts = [];
+  const at = ([x, y]) => [CX + x * SHRIMP.L, CY + y * SHRIMP.L];
+  const fw = sp("shrimp"); fw.wash = 1;                       // はさみを上げた姿勢(「はさみと頭胸部」の重なり用)
+  const drawW = place(fw, SHRIMP.L), RW = renderOn(RED, drawW), GW = renderOn(GREEN, drawW);
+  const pose = p => p[3] === "wash" ? [RW, GW] : [R, G];
+  const est = {};
+  [...SHRIMP.body, ...SHRIMP.overlap].forEach(p => { const [X, Y] = at(p), [r, g] = pose(p); est[p[2]] = alphaEst(r.g, g.g, X, Y); });
+  SHRIMP.body.forEach(p => { const [X, Y] = at(p); pts.push({ x: X, y: Y, kind: "shrimp-body", label: p[2] }); });
+  SHRIMP.overlap.forEach(p => { const [X, Y] = at(p); pts.push({ x: X, y: Y, kind: "overlap", label: p[2] }); });
+  marks.push({ title: "ヤマトヌマエビ", canvas: G.c, pts: pts.filter(q => !/洗う/.test(q.label) && !/はさみ/.test(q.label)) });
+  marks.push({ title: "ヤマトヌマエビ(顔を洗う姿勢:はさみと頭胸部の重なり)", canvas: GW.c, pts: pts.filter(q => /はさみ/.test(q.label)) });
+  [...SHRIMP.body, ...SHRIMP.overlap].forEach(p => {
+    const [X, Y] = at(p), [r, g] = pose(p), d = blockMaxDiff(r.g, g.g, X, Y), a = est[p[2]];
+    add(`ヤマトヌマエビ:体(${p[2]})は背景がうっすら見える(差 > ${TOL_BODY}、不透明度 ${fa} ± ${TOL_ALPHA})`, d > TOL_BODY && Math.abs(a - fa) <= TOL_ALPHA, `差 ${d} / 不透明度の推定 ${a.toFixed(3)}`);
+  });
+  const ref = Math.max(...SHRIMP.body.map(p => est[p[2]]));
+  SHRIMP.overlap.forEach(p => {
+    add(`ヤマトヌマエビ:重なる所(${p[2]})が重ならない体の画素より濃くならない(推定 ≤ 重ならない最大 ${ref.toFixed(3)} + ${TOL_OVERLAP})`, est[p[2]] <= ref + TOL_OVERLAP, `推定 ${est[p[2]].toFixed(3)}`);
+  });
+  // 脚が体越しに二重に見えない:体の中の歩脚の位置(0.2L)の画素と、同じ高さで脚の隣(0.16L)の画素が同じ濃さ
+  { const a1 = alphaEst(R.g, G.g, CX + 0.2 * SHRIMP.L, CY + 0.09 * SHRIMP.L), a2 = alphaEst(R.g, G.g, CX + 0.255 * SHRIMP.L, CY + 0.09 * SHRIMP.L);
+    add("ヤマトヌマエビ:体の中の歩脚の位置と、その隣で濃さが同じ(脚が体越しに二重に見えない。差 ≤ 0.03)", Math.abs(a1 - a2) <= 0.03, `${a1.toFixed(3)} と ${a2.toFixed(3)}`); }
+}
+
+/* ---- 石巻貝(横向き)---- */
+{
+  const f = sp("snail");
+  checkCreature("石巻貝(横向き)", "snail", place(f, SNAIL.L), { L: SNAIL.L, body: SNAIL.body.map(([x, y, l]) => [x, y, l]) });
+}
+/* ---- 石巻貝(前面ガラス:足の裏と口)---- */
+{
+  const f = sp("snail"), L = FRONT.L, rx = FRONT.rx * L, ry = FRONT.ry * L;
+  const draw = () => drawSnailFront(f, L, CX, CY, 0, 1), R = renderOn(RED, draw), G = renderOn(GREEN, draw), pts = [];
+  FRONT.body.forEach(([x, y, label]) => {
+    const X = CX + x * rx, Y = CY + y * ry, d = blockMaxDiff(R.g, G.g, X, Y);
+    pts.push({ x: X, y: Y, kind: "body", label });
+    add(`石巻貝(前面ガラス):${label}は背景に影響されない(差 ≤ ${TOL_BODY}/255)`, d <= TOL_BODY, `差 ${d}`);
+  });
+  marks.push({ title: "石巻貝(前面ガラス)", canvas: G.c, pts });
+}
+
+/* ---- 出現・消滅のフェード(a < 1)の間だけは体も透ける(フェードが効いている確認) ---- */
+{
+  const f = sp("snail"), draw = () => drawCreature(f, SNAIL.L, 0, CX, CY, 0, 1, 0.5), R = renderOn(RED, draw), G = renderOn(GREEN, draw);
+  const [x, y] = SNAIL.body[1], a = alphaEst(R.g, G.g, CX + x * SNAIL.L, CY + y * SNAIL.L);
+  add("石巻貝:フェード(a = 0.5)の間は足が半透明(不透明度の推定 0.5 ± 0.05)", Math.abs(a - 0.5) <= 0.05, `推定 ${a.toFixed(3)}`);
+}
+
+/* ---------------- 表示 ---------------- */
+const tb = document.querySelector("#res tbody");
+results.forEach(r => {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td></td><td class="${r.ok ? "ok" : "ng"}">${r.ok ? "✓" : "✗"}</td><td></td>`;
+  tr.children[0].textContent = r.name; tr.children[2].textContent = r.value;
+  tb.appendChild(tr);
+});
+const COL = { body: "#1677ff", fin: "#e0219b", overlap: "#ff8a00", "shrimp-body": "#00b7d6" };
+const views = document.getElementById("views");
+marks.forEach(m => {
+  const wrap = document.createElement("div"); wrap.className = "view";
+  const cap = document.createElement("b"); cap.textContent = m.title; wrap.appendChild(cap);
+  const c = document.createElement("canvas"); c.width = CW * 2; c.height = CH * 2; c.style.width = `${CW * 2}px`; c.style.height = `${CH * 2}px`;
+  const g = c.getContext("2d"); g.imageSmoothingEnabled = false; g.drawImage(m.canvas, 0, 0, CW * 2, CH * 2);
+  g.font = "10px sans-serif";
+  m.pts.forEach(p => {
+    g.strokeStyle = COL[p.kind] || "#000"; g.lineWidth = 2; g.beginPath(); g.arc(p.x * 2, p.y * 2, 6, 0, Math.PI * 2); g.stroke();
+    g.fillStyle = COL[p.kind] || "#000"; g.fillRect(p.x * 2 - 1, p.y * 2 - 1, 2, 2);
+  });
+  wrap.appendChild(c); views.appendChild(wrap);
+});
+const allOk = results.every(r => r.ok), ng = results.filter(r => !r.ok).length;
+const sum = document.getElementById("summary");
+sum.textContent = allOk ? `全 ${results.length} 項目 ✓` : `${ng} 項目 ✗(全 ${results.length} 項目)`;
+sum.className = allOk ? "ok" : "ng";
+window.__pixels = { done: true, ok: allOk, total: results.length, failed: ng, tolerances: { TOL_BODY, MIN_FIN, TOL_ALPHA, TOL_OVERLAP }, results };
+</script>
+</body>
+</html>

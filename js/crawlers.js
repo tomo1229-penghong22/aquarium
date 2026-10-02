@@ -251,8 +251,8 @@ function drawOne(f){
   const jit = Math.sin(c.clk * 38) * 0.5 * U * c.graze, wag = Math.sin(c.clk * 38) * 0.05 * c.graze;
   if (c.st === "swim") { drawCreature(f, L0, Math.sin(f.phase) * S.wag, c.fx * W, c.fy * H, c.ssx * c.sa, c.ssx, 1); return; }
   if (onGlass(c)) {
-    const k = c.surf === "gB" ? 0.8 : 1.1, a = c.surf === "gB" ? 0.85 : 1;
-    drawCreature(f, L0 * k, wag, c.fx * W + Math.cos(c.ang) * jit, c.fy * H + Math.sin(c.ang) * jit, c.ang, c.sx, a); return;
+    const k = c.surf === "gB" ? 0.8 : 1.1; // 奥のガラスは小さく(奥行きの淡さは、描画順で後から重なる霞の層が受け持つ。透明にはしない)
+    drawCreature(f, L0 * k, wag, c.fx * W + Math.cos(c.ang) * jit, c.fy * H + Math.sin(c.ang) * jit, c.ang, c.sx, 1); return;
   }
   const [x, y, rot, sx] = surfacePose(c, L0, GROUND.oto, 1);
   drawCreature(f, L0, wag, x + c.tx * jit, y + c.ty * jit, rot, sx, 1);
