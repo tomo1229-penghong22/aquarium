@@ -34,7 +34,7 @@ ORDER.forEach(sp => {
   const prevU = U;
   const f = { phase: 0.6, pale: 0, spots: [[0.5, 0.2, 1], [0.7, -0.2, 1], [0.8, 0.1, 1]], variant: 0, ox: 0 };
   setU(0.9);
-  const L = { neon: 46, rummy: 46, guppy: 32, platy: 44, angel: 25, cory: 46 }[sp];
+  const L = { neon: 46, rummy: 46, guppy: 32, platy: 44, angel: 25, cory: 46, oto: 40, shrimp: 40, snail: 24 }[sp];
   drawIcon(g, sp, L, f);
   setU(prevU);
 });

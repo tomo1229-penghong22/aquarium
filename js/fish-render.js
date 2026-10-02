@@ -234,7 +234,14 @@ export const PAINT = {
     pectoral(L, H, f, finC);
     eye(L * 0.3, -H * 0.1, H * 0.13, "#8a8f86");
   },
+  /* 仮の描画(N1。N2 で本描画に置き換える):体長 L の楕円 1 つだけ */
+  oto(L, wag, f){ placeholder(L, 0.2, "#8c8a6a"); },
+  shrimp(L, wag, f){ placeholder(L, 0.16, "#b9c3b4"); },
+  snail(L, wag, f){ placeholder(L, 0.5, "#7a6a4a"); },
 };
+function placeholder(L, hr, col){
+  ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(0, 0, L * 0.5, L * hr, 0, 0, TAU); ctx.fill();
+}
 
 export function drawFish(f){
   const S = SPECIES[f.sp];

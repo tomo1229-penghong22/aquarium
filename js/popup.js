@@ -43,7 +43,7 @@ export function popReset(sp){
 }
 function pickAct(){
   const pool = [["turn", 3], ["drift", 2.5], ["food", 2], ["bubble", 2], ["wiggle", 1.3], ["spin", 1], ["startle", 1], ["peek", 1.2]];
-  ({ neon: [["dash", 2.2]], rummy: [["dash", 2.2]], guppy: [["showoff", 2.6]], platy: [["food", 2]], angel: [["bow", 2.4]], cory: [["wink", 3], ["nibble", 3]] })[P.sp].forEach(a => pool.push(a));
+  ({ neon: [["dash", 2.2]], rummy: [["dash", 2.2]], guppy: [["showoff", 2.6]], platy: [["food", 2]], angel: [["bow", 2.4]], cory: [["wink", 3], ["nibble", 3]] })[P.sp]?.forEach(a => pool.push(a));
   const list = pool.filter(a => !(P.sp === "angel" && a[0] === "spin") && a[0] !== P.lastAct);
   let sum = list.reduce((s, a) => s + a[1], 0), r = Math.random() * sum;
   for (const a of list) { r -= a[1]; if (r <= 0) return a[0]; }

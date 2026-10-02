@@ -142,6 +142,49 @@ for (const sp of A.ORDER) {
 }
 
 {
+  // お掃除生体(oto・shrimp・snail):既定・上限、増減、保存と復元
+  const NEW = ["oto", "shrimp", "snail"], want = { oto: [3, 10], shrimp: [5, 20], snail: [3, 10] };
+  const specOk = NEW.every(k => A.SPECIES[k] && A.SPECIES[k].def === want[k][0] && A.SPECIES[k].max === want[k][1])
+    && A.ORDER.slice(-3).join() === NEW.join() && A.ORDER.slice(0, 6).join() === "neon,rummy,guppy,platy,angel,cory";
+  check("新しい3種のデータ:既定(3/5/3)・上限(10/20/10)・ORDER の末尾(既存6種の順は不変)", specOk);
+  check("パネルの種の一覧が 9 種", A.ORDER.length === 9, `${A.ORDER.length} 種`);
+  let err = null;
+  try {
+    for (const k of NEW) {
+      for (const n of [0, 1, A.SPECIES[k].max, 0, A.SPECIES[k].def]) {
+        A.counts[k] = n; A.syncFish(); frames(20);
+        if (A.fishes.filter(f => f.sp === k).length !== n) throw new Error(`${k} を ${n} にしても数が合わない`);
+      }
+    }
+    A.setT(34); frames(60); A.setT(18); frames(60); A.setT(25);
+    if (!finite()) throw new Error("NaN");
+  } catch (e) { err = e; }
+  check("新しい3種を 0〜上限で増減しても例外なし(水温を変えても安定)", !err, err ? String(err) : "");
+
+  // 保存の復元:core.js をクエリ付きで読み直す(モジュールの再評価)。localStorage を一時的に差し替える
+  const origLS = globalThis.localStorage;
+  const reload = async (data, tag) => {
+    globalThis.localStorage = { getItem: () => data === null ? null : JSON.stringify(data), setItem: noop };
+    try { return await import(pathToFileURL(join(root, "js", "core.js")).href + "?" + tag); } finally { globalThis.localStorage = origLS; }
+  };
+  try {
+    const old = await reload({ counts: { neon: 7, rummy: 0, guppy: 5, platy: 3, angel: 2, cory: 4 }, T: 26 }, "old");
+    const defOk = NEW.every(k => old.counts[k] === A.SPECIES[k].def) && old.counts.neon === 7;
+    check("古い保存データ(新しい種のキーなし)→ 新しい種は既定の数", defOk, NEW.map(k => `${k}=${old.counts[k]}`).join(" "));
+    const nw = await reload({ counts: { oto: 7, shrimp: 12, snail: 0, neon: 9 }, T: 25 }, "new");
+    check("保存した新しい種の数が再読み込み後に復元される(oto 7 / shrimp 12 / snail 0)", nw.counts.oto === 7 && nw.counts.shrimp === 12 && nw.counts.snail === 0 && nw.counts.neon === 9,
+      NEW.map(k => `${k}=${nw.counts[k]}`).join(" "));
+    const big = await reload({ counts: { oto: 99, shrimp: -3, snail: "x" } }, "big");
+    check("範囲外・不正な保存値は丸める/無視する(oto 99→10、shrimp -3→0、snail 文字列→既定)", big.counts.oto === 10 && big.counts.shrimp === 0 && big.counts.snail === 3,
+      NEW.map(k => `${k}=${big.counts[k]}`).join(" "));
+    // 実際の保存(save)が新しい種の数を含むこと
+    A.counts.shrimp = 8; core.save();
+    check("save() の保存データに新しい種の数が入る", JSON.parse(lsLast).counts.shrimp === 8);
+    A.counts.shrimp = A.SPECIES.shrimp.def; A.syncFish();
+  } catch (e) { check("保存の復元テストが例外なく動く", false, String(e)); }
+}
+
+{
   // sw.js の事前キャッシュのリストに、js/ の全 .js・icons/ の全 PNG・manifest が含まれていること
   const sw = readFileSync(join(root, "sw.js"), "utf8");
   const list = ((sw.match(/PRECACHE\s*=\s*\[([\s\S]*?)\]/) || [])[1] || "").match(/"[^"]+"/g)?.map(s => s.slice(1, -1).replace(/^\.\//, "")) ?? [];

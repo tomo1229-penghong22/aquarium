@@ -31,7 +31,8 @@ export const DO_K = { air: 3.0, filter: 3.0, pBase: 1.0, pGrowth: 0.5, rFish: 0.
 export function DOsat(T){ return 14.652 - 0.41022 * T + 0.007991 * T * T - 0.000077774 * T * T * T; }
 export const q10 = T => Math.pow(2, (T - 25) / 10);
 export const hypoxia = d => clamp((4.5 - d) / 2.5, 0, 1);
-export const fishLoadOf = (sp, scale = 1) => Math.pow(SPECIES[sp].len * scale / DO_K.refLen, 3);
+export const INVERT_RESP = 0.4; // 無脊椎動物(エビ・貝)は同じ体長の魚より代謝が低い(呼吸量の係数)
+export const fishLoadOf = (sp, scale = 1) => Math.pow(SPECIES[sp].len * scale / DO_K.refLen, 3) * (SPECIES[sp].invert ? INVERT_RESP : 1);
 /* 種ごとの数 { neon: n, ... } から load を計算(個体の大きさは 1.0 とみなす) */
 export function loadFromCounts(c){ return ORDER.reduce((s, k) => s + (c[k] || 0) * fishLoadOf(k), 0); }
 export function defaultLoad(){ return loadFromCounts(Object.fromEntries(ORDER.map(k => [k, SPECIES[k].def]))); }

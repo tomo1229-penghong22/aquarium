@@ -7,8 +7,12 @@ export const SPECIES = {
   platy: { name:"プラティ",             len:44, speed:44, school:0.2, zone:[0.15,0.62], opt:[21,27],     max:12, def:3,  wag:0.26, wagRate:1.0, alpha:0.9, variants:3 },
   angel: { name:"エンゼルフィッシュ",   len:60, speed:30, school:0.05,zone:[0.20,0.60], opt:[24,29],     max:6,  def:2,  wag:0.16, wagRate:0.7, alpha:0.84, variants:2 },
   cory:  { name:"コリドラス・パンダ",   len:40, speed:34, school:0.3, zone:[0.9,1.0],   opt:[21,26],     max:12, def:4,  wag:0.3,  wagRate:1.4, alpha:0.9, variants:1 },
+  // お掃除生体(N1:データのみ。solo=群れの中心を持たない。invert=無脊椎動物で、呼吸量を fishLoadOf で下げる)
+  oto:    { name:"オトシンクルス",       len:36, speed:26, school:0.05,zone:[0.85,1.0],  opt:[22,26],     max:10, def:3,  wag:0.3,  wagRate:1.2, alpha:0.9, variants:1, solo:true },
+  shrimp: { name:"ヤマトヌマエビ",       len:36, speed:22, school:0.05,zone:[0.85,1.0],  opt:[20,26],     max:20, def:5,  wag:0.2,  wagRate:1.0, alpha:0.85,variants:1, solo:true, invert:true },
+  snail:  { name:"石巻貝",               len:20, speed:4,  school:0,   zone:[0.9,1.0],   opt:[20,27],     max:10, def:3,  wag:0,    wagRate:0,   alpha:0.95,variants:1, solo:true, invert:true },
 };
-export const ORDER = ["neon","rummy","guppy","platy","angel","cory"];
+export const ORDER = ["neon","rummy","guppy","platy","angel","cory","oto","shrimp","snail"];
 export const GUPPY_COL = [["#ff6a2a","#ffd24a"],["#2c6fe0","#8fd8ff"],["#d8262e","#ff9a8a"],["#7b3fd0","#43c0e8"]];
 export const PLATY_COL = [{b:"#e0412b",t:"#c93320"},{b:"#f39a2a",t:"#222222"},{b:"#f2c533",t:"#eab22a"}];
 
@@ -20,5 +24,8 @@ export const NOTES = {
   platy: "丈夫で人なつこく、水面に落ちた餌もよくつつきます。",
   angel: "長いひれを広げて、ゆったりと優雅に泳ぐシクリッドの仲間です。",
   cory: "底の砂をつつく働き者です。目をくるっと回す、いわゆる「ウインク」をします。",
+  oto: "口が吸盤のようになっていて、ガラスや葉に吸いついて表面の茶ゴケ(珪藻)を食べます。体長は4cmほどで、おとなしい性格です。",
+  shrimp: "水槽のコケを食べる名手で、細い前脚で表面をつまんで食べます。水草の若い葉は傷めにくいとされます。幼生は海水でないと育たないため、淡水では繁殖しません。",
+  snail: "ガラスや岩の上をゆっくり這いながらコケを食べます。汽水域で産卵するため、淡水の水槽では卵がかえらず、増えすぎません。",
 };
-export const POP_L = { neon: 150, rummy: 148, guppy: 104, platy: 136, angel: 66, cory: 146 };
+export const POP_L = { neon: 150, rummy: 148, guppy: 104, platy: 136, angel: 66, cory: 146, oto: 150, shrimp: 150, snail: 90 };

@@ -105,6 +105,7 @@ function pickTarget(f){
 export function updateSchools(dt){
   ORDER.forEach(sp => {
     const s = schools[sp], S = SPECIES[sp];
+    if (S.solo) return; // 群れの中心を持たない種(オト・エビ・貝)
     s.timer -= dt;
     if (s.timer <= 0) {
       const zn = effectiveZone(S);
@@ -155,7 +156,7 @@ export function updateFish(f, dt){
     const s = schools[f.sp];
     const n = counts[f.sp];
     const spread = schoolSpread(n);
-    const pull = S.school > 0.5 ? S.school : S.school * LOOSE_PULL;
+    const pull = S.solo ? 0 : S.school > 0.5 ? S.school : S.school * LOOSE_PULL;
     tx = lerp(f.tx, s.cx + f.ox * spread * 1.4, pull);
     // 群れる種は縦の散らばりを大きくして、進行方向に細長い一列に見えないようにする(他の種は従来どおり 0.6)
     ty = lerp(f.ty, s.cy + f.oy * spread * (S.school > 0.5 ? SCHOOL_VSPREAD : 0.6), pull);
