@@ -1,8 +1,9 @@
 // リリース補助:確認 → CACHE_VERSION を上げる → コミット → push。
 //   npm run release              実行
 //   npm run release -- --dry-run 判定と表示だけ(書き換え・コミット・push はしない)
+// npm test は含まない(コミット前に実行しておく)。
 // Node 標準のみ。実行するのは人間。
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -85,13 +86,7 @@ function main(argv) {
   }
   log(`前回のリリース: ${last.slice(0, 7)}\nリリースする変更(${files.length} ファイル):\n${files.map(f => "  " + f).join("\n")}`);
 
-  // 5. テスト
-  log("\nnpm test を実行します(約 30 秒)...");
-  const t = spawnSync("npm", ["test"], { cwd: ROOT, stdio: "inherit", shell: true });
-  if (t.status !== 0) throw new Abort("中止:npm test が失敗しました。");
-  log("✓ npm test 成功");
-
-  // 6. 版を上げる
+  // 5. 版を上げる
   const original = readFileSync(SW, "utf8");
   const bumped = bumpSw(original);
   if (!bumped) throw new Abort('中止:sw.js の CACHE_VERSION が "v数字" の形ではありません。手で確認してください(推測で直しません)。');
@@ -103,7 +98,7 @@ function main(argv) {
   swWritten = true;
   log(`\nCACHE_VERSION: ${bumped.from} → ${bumped.to}`);
 
-  // 7. コミット
+  // 6. コミット
   const message = `chore: release ${bumped.to}\n\n${files.map(f => "- " + f).join("\n")}\n`;
   try {
     git("add", "sw.js");
@@ -114,7 +109,7 @@ function main(argv) {
   }
   log(`✓ コミット: chore: release ${bumped.to}`);
 
-  // 8. push(force なし)
+  // 7. push(force なし)
   try {
     git("push", "origin", "main");
   } catch (e) {
@@ -124,7 +119,7 @@ function main(argv) {
       "  - やめるとき: git reset --hard HEAD~1  (リリースのコミットを取り消し、sw.js を元に戻す)");
   }
 
-  // 9. 完了
+  // 8. 完了
   log(`\n完了:${bumped.to} を公開しました。\n  URL: ${PAGES_URL}\n  iPhone ではアプリを2回起動すると反映されます(1回目で新しい版を取得し、2回目で切り替わる)。`);
   return 0;
 }

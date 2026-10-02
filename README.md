@@ -21,7 +21,7 @@ GitHub Pages などの HTTPS のサーバーに置くと、ホーム画面に追
 2. 共有ボタン → 「ホーム画面に追加」
 3. 以後は、ホーム画面のアイコンから起動する。最初に開いたあとは、機内モードでも起動します(Google Fonts だけは、初回にオンラインで開いたときに保存されます。取れていなければ、標準のフォントで表示されます)
 
-アプリのファイルを変えてコミットしたら、`npm run release` で公開します(事前の確認だけなら `npm run release -- --dry-run`)。main ブランチ・未コミットなし・origin より遅れていない、を確認し、`npm test` を通したうえで、`sw.js` の `CACHE_VERSION`(例:`"v2"` → `"v3"`)を上げてコミットし、push します。`CACHE_VERSION` を上げないと、インストール済みの端末が古いキャッシュのまま起動するため、手では上げず、このコマンドを使ってください。ファイルを足したときの `sw.js` の `PRECACHE` への追加は手作業です(漏れは `npm test` で分かります)。アイコンを作り直すときは `node tools/make-icons.mjs` を実行します。
+アプリのファイルを変えてコミットしたら、`npm run release` で公開します(事前の確認だけなら `npm run release -- --dry-run`)。main ブランチ・未コミットなし・origin より遅れていない、を確認し、`sw.js` の `CACHE_VERSION`(例:`"v2"` → `"v3"`)を上げてコミットし、push します。テストは含まないので、コミットの前に `npm test` を通しておいてください。`CACHE_VERSION` を上げないと、インストール済みの端末が古いキャッシュのまま起動するため、手では上げず、このコマンドを使ってください。ファイルを足したときの `sw.js` の `PRECACHE` への追加は手作業です(漏れは `npm test` で分かります)。アイコンを作り直すときは `node tools/make-icons.mjs` を実行します。
 
 描画ログの基準 `tests/baseline/drawlog.log.gz` は容量が大きいためリポジトリに含めず、ハッシュ(`tests/baseline/drawlog.sha256`)だけを管理しています。基準を取り直すには `node tests/drawlog.mjs --record` を実行します。
 

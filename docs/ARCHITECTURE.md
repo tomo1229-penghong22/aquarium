@@ -76,7 +76,7 @@ GitHub Pages(サブパス配信)に置き、Safari の「ホーム画面に追�
   - install で `PRECACHE`(`./`、`index.html`、manifest、`js/*.js`、`icons/*.png`)を `cache: "reload"` で取得して、`aquarium-<CACHE_VERSION>` に入れる。`skipWaiting()`。
   - activate で、`aquarium-` で始まる古いキャッシュを削除する(`aquarium-fonts` は残す)。`clients.claim()`。
   - fetch:同一オリジンはキャッシュ優先、なければネットワーク。ナビゲーションで両方だめなら、キャッシュ済みの `index.html` を返す。Google Fonts は初回にオンラインで取れたものを `aquarium-fonts` に入れる(stale-while-revalidate)。オフラインで未取得なら失敗させ、CSS のフォールバックフォントで表示する。
-- 更新の手順:`js/` や `index.html` などを変えてコミットしたら、`npm run release`(確認は `--dry-run`)を実行する。`tools/release.mjs` が、main・未コミットなし・origin より遅れていないことを確認し、前回のリリース(`CACHE_VERSION` の行を最後に変えたコミット)以降にアプリのファイル(`index.html`、`manifest.webmanifest`、`sw.js`、`js/`、`icons/`)の変更があれば、`npm test` → `CACHE_VERSION` を `vN` → `vN+1` に上げる → コミット → push まで行う。ファイルを足したときの `PRECACHE` への追加は引き続き手動で、`npm test` の「sw.js の事前キャッシュに全ファイルが含まれる」が足し忘れを検出する。新しい Service Worker は、次にページを開いたときに入れ替わる(`skipWaiting` と `clients.claim` により待機しない。ただし表示中のページは、再読み込みするまで古いファイルのまま)。
+- 更新の手順:`js/` や `index.html` などを変えてコミットしたら、`npm run release`(確認は `--dry-run`)を実行する。`tools/release.mjs` が、main・未コミットなし・origin より遅れていないことを確認し、前回のリリース(`CACHE_VERSION` の行を最後に変えたコミット)以降にアプリのファイル(`index.html`、`manifest.webmanifest`、`sw.js`、`js/`、`icons/`)の変更があれば、`CACHE_VERSION` を `vN` → `vN+1` に上げる → コミット → push まで行う(`npm test` は含まないので、コミット前に通しておく)。ファイルを足したときの `PRECACHE` への追加は引き続き手動で、`npm test` の「sw.js の事前キャッシュに全ファイルが含まれる」が足し忘れを検出する。新しい Service Worker は、次にページを開いたときに入れ替わる(`skipWaiting` と `clients.claim` により待機しない。ただし表示中のページは、再読み込みするまで古いファイルのまま)。
 - iOS 向け:`viewport-fit=cover` と `black-translucent` で、standalone 表示では画面全体に描画される。ノッチとホームバーは `env(safe-area-inset-*)` で避ける(`:root` の padding、全画面時の `.ctl` と `.fshint`)。
 
 ## 全体の流れ
