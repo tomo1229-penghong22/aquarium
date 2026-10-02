@@ -34,10 +34,10 @@ function loadApp() {
   return {
     load: () => imp("main.js"),
     hooks: async () => {
-      const [core, sp, beh, pop, ui] = await Promise.all([imp("core.js"), imp("species.js"), imp("fish-behavior.js"), imp("popup.js"), imp("ui.js")]);
+      const [core, sp, beh, pop, ui, gov] = await Promise.all([imp("core.js"), imp("species.js"), imp("fish-behavior.js"), imp("popup.js"), imp("ui.js"), imp("governor.js")]);
       return { counts: core.counts, ORDER: sp.ORDER, SPECIES: sp.SPECIES, syncFish: beh.syncFish, setNight: ui.setNight, setPseudo: ui.setPseudo,
         openPop: pop.openPop, closePop: pop.closePop, drawIcon: ui.drawIcon, startAct: pop.startAct, P: pop.P,
-        setU: core.setU, getU: () => core.U, getNightT: () => core.nightT };
+        GOV: gov.GOV, setU: core.setU, getU: () => core.U, getNightT: () => core.nightT };
     },
   };
 }
@@ -352,6 +352,7 @@ async function generate() {
   env.setRec(false);
   const loadEnd = env.lines.length;
   const app = await appLoader.hooks();
+  app.GOV.override = 0; // 性能の測定を固定する(実測のゆらぎで、なめた跡の on/off が変わらないように)
   const stages = [{ name: "0-load", start: 0, end: loadEnd, frames: ["all"] }, ...runScenario(env, app)];
   return { lines: env.lines, stages };
 }
