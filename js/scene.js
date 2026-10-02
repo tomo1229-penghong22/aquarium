@@ -13,7 +13,7 @@ const lt = (c, k) => { const a = ltRgb(c), b = ltRgb(WATER_LT); return `rgb(${a.
 export let staticNight = null, staticLayer = null, plants = { back: [], mid: [], front: [] }, rocks = [];
 let rays = [], motes = [];
 export const bubbles = [];
-export const FX = { puff: true }; // コリドラスの砂煙(false で無効。描画ログの照合用・テスト用)
+export const FX = { puff: true, shadow: true, gradeDay: true, gradeNight: true }; // puff:コリドラスの砂煙(false で無効。描画ログの照合用・テスト用)。shadow・gradeDay・gradeNight:?perf&skip= の計測専用(通常は常に true)
 const puffs = [];
 export const puffCount = () => puffs.length;
 export const getWood = () => wood; // 流木の枝(各枝は [x, y, 太さ] の点列)。お掃除生体の「這える面」の読み取り用
@@ -893,7 +893,7 @@ export function drawThermometer(){
   ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.fillRect(x - w * 0.18 - 1.4 * U, yT(Tw), 0.9 * U, bulbY - yT(Tw) - 4 * U);
   // 数字ラベル(読みやすいよう管の外に)
   ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.textAlign = "left";
-  ctx.shadowColor = "rgba(0,0,0,0.45)"; ctx.shadowBlur = 3 * U;
+  if (FX.shadow) { ctx.shadowColor = "rgba(0,0,0,0.45)"; ctx.shadowBlur = 3 * U; }
   [20, 25, 30, 35].forEach(T => ctx.fillText(String(T), x + w * 0.62, yT(T)));
   ctx.font = `700 ${Math.max(11, 13 * U)}px "Zen Kaku Gothic New", sans-serif`;
   ctx.textAlign = "center";
@@ -1068,8 +1068,8 @@ export function drawGlass(){
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
 }
 export function grade(){
-  if (nightT > 0.001) nightGrade(nightT);
-  if (nightT > 0.999) return;
+  if (nightT > 0.001 && FX.gradeNight) nightGrade(nightT);
+  if (nightT > 0.999 || !FX.gradeDay) return;
   ctx.save();
   ctx.globalAlpha = 1 - nightT;
   ctx.globalCompositeOperation = "soft-light";

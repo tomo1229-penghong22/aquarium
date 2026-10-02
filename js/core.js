@@ -27,7 +27,11 @@ export function getSavedRaw(){ return savedRaw; }
 /* 追加の保存項目:fn() が返すオブジェクトを、保存データへ混ぜる(循環 import を避けるための登録口) */
 let extraSave = null;
 export function setExtraSave(fn){ extraSave = fn; }
+let saveFrozen = false;
+/* ?perf&bench の間だけ呼ぶ:以後 save() は何も書かない(計測のために照明を切り替えても保存データを変えない) */
+export function freezeSave(){ saveFrozen = true; }
 export function save(){
+  if (saveFrozen) return;
   try {
     let extra = null; try { extra = extraSave ? extraSave() : null; } catch (e) {}
     localStorage.setItem("aquarium-v1", JSON.stringify({ counts, T: Tset, night: nightOn, ...extra }));

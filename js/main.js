@@ -1,76 +1,91 @@
 // 描画順(draw)・毎フレームの更新(loop)・リサイズ・開始処理。
 // このファイルがエントリポイント。全モジュールの評価が終わってから、末尾の「開始」が実行される。
-import { DPR, counts, H, save, Tset, Tw, W, clamp, ctx, cv, nightOn, nightT, setDPR, setH, setNightT, setTw, setU, setW, setWaterTop, tankEl, timeScale, waterTop } from "./core.js";
+import { DPR, counts, H, freezeSave, save, Tset, Tw, W, clamp, ctx, cv, nightOn, nightT, setDPR, setH, setNightT, setTw, setU, setW, setWaterTop, tankEl, timeScale, waterTop } from "./core.js";
 import { ORDER, SPECIES } from "./species.js";
 import { applyAgingParam, checkMaintenance, fishLoadOf, initAging, onVisibility, updateAging } from "./aging.js";
 import { drawFish } from "./fish-render.js";
 import { drawCrawlers, grazers, relayout, updateCrawler } from "./crawlers.js";
 import { govGrace, govTick, trailStrength } from "./governor.js";
 import { fishes, schools, syncFish, updateFish, updateHealth, updateSchools } from "./fish-behavior.js";
-import { bubbles, buildMeter, buildScene, drawBubbles, drawCarpet, drawAgingGlass, drawAgingHard, drawCaustics, drawClock, drawFern, drawFixture, drawFloats, drawGlass, drawLotus, drawMoss, drawMotes, drawO2Meter, drawPuffs, drawRays, drawRibbon, drawRock, drawStem, drawSurface, drawSword, drawThermometer, drawWood, grade, plants, rocks, staticLayer, staticNight, updateBubbles, updatePuffs, updateTrails } from "./scene.js";
-import { autoLightTick, layoutClockBtn, showNoticeIfAny, updatePanel } from "./ui.js";
-import { PERF, perfBegin, perfEnd, perfFrame, perfMark, perfReport } from "./perf.js";
+import { FX, bubbles, buildMeter, buildScene, drawBubbles, drawCarpet, drawAgingGlass, drawAgingHard, drawCaustics, drawClock, drawFern, drawFixture, drawFloats, drawGlass, drawLotus, drawMoss, drawMotes, drawO2Meter, drawPuffs, drawRays, drawRibbon, drawRock, drawStem, drawSurface, drawSword, drawThermometer, drawWood, grade, plants, rocks, staticLayer, staticNight, updateBubbles, updatePuffs, updateTrails } from "./scene.js";
+import { autoLightTick, layoutClockBtn, setNight, showNoticeIfAny, updatePanel } from "./ui.js";
+import { PERF, benchOn, dprCap, perfBegin, perfBenchInit, perfEnd, perfFrame, perfMark, perfReport, skipOn } from "./perf.js";
 
 /* ---------------- メインループ ---------------- */
 let last = performance.now(), T = 0, frameNo = 0, lightAcc = 0;
+/* ?perf&skip= の計測専用:scene.js の FX フラグ(shadow・gradeDay・gradeNight)を skip の指定に合わせる。?perf なしでは呼ばれない */
+function applyPerfFx(){ FX.shadow = !skipOn("shadow"); FX.gradeDay = !skipOn("gradeDay"); FX.gradeNight = !skipOn("gradeNight"); }
 function draw(){
   if (PERF) perfBegin();
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  ctx.drawImage(staticLayer, 0, 0, W, H);
-  if (nightT > 0.001) { ctx.globalAlpha = nightT; ctx.drawImage(staticNight, 0, 0, W, H); ctx.globalAlpha = 1; }
+  // skipOn は ?perf&skip= のときだけ true を返す(計測専用。通常は常に false で、描画命令は変わらない)
+  if (skipOn("static")) ctx.clearRect(0, 0, W, H);
+  else {
+    ctx.drawImage(staticLayer, 0, 0, W, H);
+    if (nightT > 0.001) { ctx.globalAlpha = nightT; ctx.drawImage(staticNight, 0, 0, W, H); ctx.globalAlpha = 1; }
+  }
   if (PERF) perfMark("static");
-  drawRays(T);
+  if (!skipOn("rays")) drawRays(T);
   if (PERF) perfMark("rays");
-  plants.back.forEach(p => p.type === "ribbon" ? drawRibbon(p, T) : drawStem(p, T));
+  if (!skipOn("backPlants")) plants.back.forEach(p => p.type === "ribbon" ? drawRibbon(p, T) : drawStem(p, T));
   if (PERF) perfMark("backPlants");
   // 奥の水草は不透明(後ろの草が透けない)。奥行きの淡さは、この霞(水の色の薄い重ね。以前の水草の半透明 0.78 の分を引き受ける)で表す
-  ctx.fillStyle = nightT > 0.5 ? "rgba(70,120,140,0.2)" : "rgba(130,200,190,0.19)"; ctx.fillRect(0, waterTop, W, H * 0.82 - waterTop);
+  const hazeOn = !skipOn("haze"); // haze:3 か所の全面の霞(奥の水草の後・流木の前・手前の魚の前)をまとめて飛ばす
+  if (hazeOn) { ctx.fillStyle = nightT > 0.5 ? "rgba(70,120,140,0.2)" : "rgba(130,200,190,0.19)"; ctx.fillRect(0, waterTop, W, H * 0.82 - waterTop); }
   if (PERF) perfMark("haze");
-  drawBubbles();
+  if (!skipOn("bubbles")) drawBubbles();
   if (PERF) perfMark("bubbles");
   const sorted = fishes.filter(f => !SPECIES[f.sp].solo).sort((a, b) => a.z - b.z);
-  sorted.forEach(f => { if (f.z < 0.45) drawFish(f); });
-  drawCrawlers("back"); // 奥のガラスに吸いついたオト
+  if (!skipOn("backFish")) {
+    sorted.forEach(f => { if (f.z < 0.45) drawFish(f); });
+    drawCrawlers("back"); // 奥のガラスに吸いついたオト
+  }
   if (PERF) perfMark("backFish");
-  ctx.fillStyle = "rgba(110,180,175,0.045)"; ctx.fillRect(0, waterTop, W, H * 0.82 - waterTop);
-  drawWood();                 // 流木・岩は不透明(層の透明度なし)
-  rocks.forEach(drawRock);
-  drawMoss();
-  drawAgingHard();
-  drawCrawlers("low"); // 岩・砂・流木の上の貝・エビ・オト
-  plants.mid.forEach(p => p.type === "fern" ? drawFern(p, T) : p.type === "lotus" ? drawLotus(p, T) : drawSword(p, T));
+  if (hazeOn) { ctx.fillStyle = "rgba(110,180,175,0.045)"; ctx.fillRect(0, waterTop, W, H * 0.82 - waterTop); }
+  if (!skipOn("midground")) {
+    drawWood();                 // 流木・岩は不透明(層の透明度なし)
+    rocks.forEach(drawRock);
+    drawMoss();
+    drawAgingHard();
+    drawCrawlers("low"); // 岩・砂・流木の上の貝・エビ・オト
+    plants.mid.forEach(p => p.type === "fern" ? drawFern(p, T) : p.type === "lotus" ? drawLotus(p, T) : drawSword(p, T));
+  }
   if (PERF) perfMark("midground");
-  ctx.fillStyle = nightT > 0.5 ? "rgba(70,120,140,0.07)" : "rgba(130,200,190,0.07)"; ctx.fillRect(0, waterTop, W, H * 0.82 - waterTop); // 中景の草・岩・流木の淡さ(手前の魚の後ろ)
-  sorted.forEach(f => { if (f.z >= 0.45) drawFish(f); });
-  drawCrawlers("front"); // 移動中のオト
-  drawPuffs();           // コリドラスの砂煙
+  if (hazeOn) { ctx.fillStyle = nightT > 0.5 ? "rgba(70,120,140,0.07)" : "rgba(130,200,190,0.07)"; ctx.fillRect(0, waterTop, W, H * 0.82 - waterTop); } // 中景の草・岩・流木の淡さ(手前の魚の後ろ)
+  if (!skipOn("frontFish")) {
+    sorted.forEach(f => { if (f.z >= 0.45) drawFish(f); });
+    drawCrawlers("front"); // 移動中のオト
+    drawPuffs();           // コリドラスの砂煙
+  }
   if (PERF) perfMark("frontFish");
-  plants.front.forEach(p => { if (p.type === "tuft") p.blades.forEach(b => drawRibbon(b, T)); else drawCarpet(p, T); });
+  if (!skipOn("frontPlants")) plants.front.forEach(p => { if (p.type === "tuft") p.blades.forEach(b => drawRibbon(b, T)); else drawCarpet(p, T); });
   if (PERF) perfMark("frontPlants");
-  drawFloats(T);
+  if (!skipOn("floats")) drawFloats(T);
   if (PERF) perfMark("floats");
   ctx.globalAlpha = 1;
-  drawMotes(T);
+  if (!skipOn("motes")) drawMotes(T);
   if (PERF) perfMark("motes");
   // 揺らめく光の網目(魚にも水草にも砂にも落ちる)
-  drawCaustics(T);
+  if (!skipOn("caustics")) drawCaustics(T);
   if (PERF) perfMark("caustics");
-  drawSurface(T);
+  if (!skipOn("surface")) drawSurface(T);
   if (PERF) perfMark("surface");
-  drawAgingGlass(); // ガラスの汚れ・苔(色調補正の前:照明の色調がかかる)
-  drawCrawlers("glass"); // 前面ガラスの貝・オト(汚れ・苔の上、色調補正の前)
+  if (!skipOn("agingGlass")) {
+    drawAgingGlass(); // ガラスの汚れ・苔(色調補正の前:照明の色調がかかる)
+    drawCrawlers("glass"); // 前面ガラスの貝・オト(汚れ・苔の上、色調補正の前)
+  }
   if (PERF) perfMark("agingGlass");
-  grade();
+  if (!skipOn("grade")) grade();
   if (PERF) perfMark("grade");
-  drawFixture(T);
+  if (!skipOn("led")) drawFixture(T);
   if (PERF) perfMark("led");
-  drawThermometer();
+  if (!skipOn("thermometer")) drawThermometer();
   if (PERF) perfMark("thermometer");
-  drawClock();
+  if (!skipOn("clock")) drawClock();
   if (PERF) perfMark("clock");
-  drawO2Meter();
+  if (!skipOn("o2meter")) drawO2Meter();
   if (PERF) perfMark("o2meter");
-  drawGlass();
+  if (!skipOn("glass")) drawGlass();
   if (PERF) { perfMark("glass"); perfEnd("draw"); }
 }
 
@@ -88,13 +103,13 @@ function loop(now){
   updateBubbles(dt, T); updatePuffs(dt, T);
   let load = 0; for (const f of fishes) load += fishLoadOf(f.sp, f.scale);
   updateAging(realDt, { load, T: Tw, counts });
-  updateTrails(dt, grazers(), trailStrength()); // なめた跡(見た目の層)
+  updateTrails(dt, grazers(), skipOn("trails") ? 0 : trailStrength()); // なめた跡(見た目の層)
   if (PERF) perfEnd("logic");
   draw();
   govTick(performance.now() - tStart, realDt);
   if (PERF) perfReport(cv, DPR, fishes.length);
   if (frameNo % 15 === 0) updatePanel();
-  lightAcc += dt; if (lightAcc >= 1) { lightAcc = 0; autoLightTick(Date.now()); } // 照明の自動判定は約1秒ごと
+  lightAcc += dt; if (lightAcc >= 1) { lightAcc = 0; if (!benchOn()) autoLightTick(Date.now()); } // 照明の自動判定は約1秒ごと
   requestAnimationFrame(loop);
 }
 
@@ -102,7 +117,7 @@ export function resize(){
   const oldW = W, oldH = H;
   const fsOn = tankEl.classList.contains("is-fs");
   setW(cv.clientWidth || 800); setH(fsOn ? (cv.clientHeight || W * 10 / 16) : W * 10 / 16);
-  setDPR(Math.min(window.devicePixelRatio || 1, 2));
+  setDPR(Math.min(window.devicePixelRatio || 1, 2, dprCap())); // dprCap は ?perf&skip=dpr1 のときだけ 1(通常は 2 で従来どおり)
   cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
   setU(Math.min(W / 1000, H / 625)); setWaterTop(H * 0.055);
   if (oldW) fishes.forEach(f => { f.x *= W / oldW; f.y *= H / oldH; f.tx *= W / oldW; f.ty *= H / oldH; });
@@ -115,6 +130,10 @@ export function resize(){
 }
 
 /* ---------------- 開始 ---------------- */
+if (PERF) { // 計測専用(?perf のときだけ)。skip の FX フラグを反映し、bench なら自動計測を準備する
+  applyPerfFx();
+  perfBenchInit({ fx: applyPerfFx, resize: () => resize(), night: v => setNight(v), isNight: () => nightOn, freezeSave });
+}
 initAging(Date.now());
 applyAgingParam(typeof location !== "undefined" ? location.search : ""); // ?aging=... のときだけ状態を指定(無指定は何もしない)
 checkMaintenance(Date.now());
