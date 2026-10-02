@@ -1,6 +1,6 @@
 // 描画順(draw)・毎フレームの更新(loop)・リサイズ・開始処理。
 // このファイルがエントリポイント。全モジュールの評価が終わってから、末尾の「開始」が実行される。
-import { DPR, H, save, Tset, Tw, W, clamp, ctx, cv, nightOn, nightT, setDPR, setH, setNightT, setTw, setU, setW, setWaterTop, tankEl, timeScale, waterTop } from "./core.js";
+import { DPR, counts, H, save, Tset, Tw, W, clamp, ctx, cv, nightOn, nightT, setDPR, setH, setNightT, setTw, setU, setW, setWaterTop, tankEl, timeScale, waterTop } from "./core.js";
 import { ORDER } from "./species.js";
 import { applyAgingParam, checkMaintenance, fishLoadOf, initAging, onVisibility, updateAging } from "./aging.js";
 import { drawFish } from "./fish-render.js";
@@ -83,7 +83,7 @@ function loop(now){
   fishes.forEach(f => { updateHealth(f, dt); updateFish(f, dt); });
   updateBubbles(dt, T);
   let load = 0; for (const f of fishes) load += fishLoadOf(f.sp, f.scale);
-  updateAging(realDt, { load, T: Tw });
+  updateAging(realDt, { load, T: Tw, counts });
   if (PERF) perfEnd("logic");
   draw();
   if (PERF) perfReport(cv, DPR, fishes.length);

@@ -155,6 +155,54 @@ const child = (mode, env = {}) => {
   ag.restoreAging(null, NOW); // 後続のテストのため既定へ
 }
 
+/* --- お掃除生体による苔の抑制(案1) --- */
+{
+  const H = 3600, ORD = sp.ORDER;
+  const countsOf = f => Object.fromEntries(ORD.map(k => [k, f(k)]));
+  const zero = countsOf(() => 0), def = countsOf(k => sp.SPECIES[k].def), max = countsOf(k => sp.SPECIES[k].max);
+  // 1 に達するまでの時間(時間単位)。dt=30 秒刻み(algaeGlass・algaeHard が両方 1 になるまで)
+  const reach = c => {
+    ag.restoreAging(null, 0); ag.setAgingOn(true);
+    let tg = null, th = null, t = 0; const env = { load: 0, T: 25, counts: c };
+    while ((tg === null || th === null) && t < 400 * H) { ag.updateAging(30, env); t += 30; if (tg === null && ag.algaeGlass >= 1) tg = t / H; if (th === null && ag.algaeHard >= 1) th = t / H; }
+    return { tg, th, dirt: ag.dirt, clog: ag.clog };
+  };
+  const z = reach(zero), d = reach(def), m = reach(max), n = reach(undefined);
+  check("掃除効果:生体 0 は従来と同一(algaeGlass 16h・algaeHard 48h。counts なしも同じ)", Math.abs(z.tg - 16) < 0.01 && Math.abs(z.th - 48) < 0.01 && n.tg === z.tg && n.th === z.th, `0匹 ${z.tg.toFixed(2)}h / ${z.th.toFixed(2)}h`);
+  check("掃除効果:既定の数で algaeGlass が 1 に達する時間 ≥24h(1.5 倍以上)", d.tg >= 24, `${d.tg.toFixed(2)}h(${(d.tg / z.tg).toFixed(2)} 倍)`);
+  check("掃除効果:既定の数で algaeHard が 1 に達する時間 ≥67.2h(1.4 倍以上)", d.th >= 67.2, `${d.th.toFixed(2)}h(${(d.th / z.th).toFixed(2)} 倍)`);
+  check("掃除効果:全種最大数でも 4 倍以下(ゼロにならない)かつ既定より遅い", m.tg <= 4 * z.tg && m.th <= 4 * z.th && m.tg > d.tg && m.th > d.th, `glass ${m.tg.toFixed(2)}h(${(m.tg / z.tg).toFixed(2)} 倍)/ hard ${m.th.toFixed(2)}h(${(m.th / z.th).toFixed(2)} 倍)`);
+  check("掃除効果:dirt と clog は変わらない(生体 0 と既定で同時刻の値が同じ)", d.dirt === z.dirt || (reach(def), true) && (() => {
+    const at = c => { ag.restoreAging(null, 0); ag.setAgingOn(true); for (let i = 0; i < 2 * H / 30; i++) ag.updateAging(30, { load: 0, T: 25, counts: c }); return [ag.dirt, ag.clog]; };
+    const a = at(zero), b = at(max); return a[0] === b[0] && a[1] === b[1];
+  })());
+  // 減り方は数に対して飽和する(エビ 5→10 と 15→20 で、追加ぶんの効きが後者のほうが小さい)
+  const mh = n => ag.hardMult({ shrimp: n });
+  check("掃除効果:飽和する(エビを足したときの効き目は数が多いほど小さい。倍率は単調に減る)", mh(0) === 1 && mh(5) > mh(10) && mh(10) > mh(15) && mh(15) > mh(20) && (mh(5) - mh(10)) > (mh(15) - mh(20)) && mh(1000) > 0.25, `0:${mh(0)} 5:${mh(5).toFixed(3)} 10:${mh(10).toFixed(3)} 15:${mh(15).toFixed(3)} 20:${mh(20).toFixed(3)}`);
+  // 途中で数を変えても連続(蓄積型):10 時間後に 0 匹→最大数へ切り替え
+  ag.restoreAging(null, 0); ag.setAgingOn(true);
+  for (let i = 0; i < 10 * H / 30; i++) ag.updateAging(30, { load: 0, T: 25, counts: zero });
+  const g1 = ag.algaeGlass, h1 = ag.algaeHard;
+  ag.updateAging(30, { load: 0, T: 25, counts: max });
+  const g2 = ag.algaeGlass, h2 = ag.algaeHard;
+  check("掃除効果:途中で数を変えても値が飛ばない(10 時間後に 0→最大数。1 ステップの変化が 0.01 未満・増加は続く)", g2 >= g1 && h2 >= h1 && g2 - g1 < 0.01 && h2 - h1 < 0.01, `glass ${g1.toFixed(4)}→${g2.toFixed(4)} / hard ${h1.toFixed(5)}→${h2.toFixed(5)}`);
+  // 保存・復元(glassAge)・旧形式・メンテ
+  ag.restoreAging(null, 0);
+  for (let i = 0; i < 20 * H / 30; i++) ag.updateAging(30, { load: 0, T: 25, counts: def });
+  const raw = ag.serializeAging(), gBefore = ag.algaeGlass;
+  ag.restoreAging(raw, 0);
+  const restoredOk = Math.abs(ag.algaeGlass - gBefore) < 1e-9 && ag.glassAge === raw.glassAge && ag.glassAge < ag.sinceClean;
+  const { glassAge: _g, ...oldRaw } = raw; ag.restoreAging(oldRaw, 0);
+  const oldOk = ag.glassAge === ag.sinceClean && Math.abs(ag.algaeGlass - Math.min(1, Math.max(0, (oldRaw.sinceClean - 7200) / 50400))) < 1e-9;
+  check("掃除効果:保存→復元で algaeGlass が一致し、旧形式(glassAge なし)は sinceClean から復元", restoredOk && oldOk, `glass ${gBefore.toFixed(3)} / glassAge ${(raw.glassAge / H).toFixed(2)}h < sinceClean ${(raw.sinceClean / H).toFixed(2)}h`);
+  ag.restoreAging(raw, 0); ag.setAgingState({ algaeGlass: 0.5, algaeHard: 0.5 });
+  check("掃除効果:?aging の指定値がそのまま反映される(algaeGlass 0.5・algaeHard 0.5)", Math.abs(ag.algaeGlass - 0.5) < 1e-9 && ag.algaeHard === 0.5 && ag.glassAge === ag.sinceClean);
+  ag.restoreAging(raw, 1e12 - 3 * 86400000 * 0); ag.setAgingState({ lastClean: 0 });
+  ag.checkMaintenance(3 * 86400000);
+  check("掃除効果:メンテで glassAge も 0 に戻る", ag.glassAge === 0 && ag.sinceClean === 0 && ag.algaeGlass === 0, `glassAge ${ag.glassAge}`);
+  ag.restoreAging(null, 0);
+}
+
 /* --- 蓄積 --- */
 {
   const run = on => {

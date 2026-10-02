@@ -44,6 +44,15 @@ export function DOeq({ load, T, clog = 0, dirt = 0, growth = 0 }){
   return Math.max(0, DOsat(T) + netOf(load, T, dirt, growth) / kAOf(clog));
 }
 
+/* ---------------- お掃除生体による苔の抑制 ----------------
+   苔の増える速さの倍率 m = 1 − R_MAX·(1 − exp(−e / E0))(e:お掃除の効き目の合計。数が増えるほど鈍る。生体 0 なら e=0 で m=1 で従来と同一。
+   完全には止まらない(m ≥ 1 − R_MAX)。ガラスの苔:石巻貝・オト。岩・流木・葉の苔:ヤマト・オト。dirt・clog には効かない。 */
+export const CLEAN = { rMax: 0.7, e0: 5, glass: { snail: 0.5, oto: 1.0 }, hard: { shrimp: 0.4, oto: 0.5 } };
+const effort = (w, c) => { let e = 0; if (c) for (const k in w) e += w[k] * Math.max(0, +c[k] || 0); return e; };
+export const algaeMult = (w, c) => 1 - CLEAN.rMax * (1 - Math.exp(-effort(w, c) / CLEAN.e0));
+export const glassMult = c => algaeMult(CLEAN.glass, c);
+export const hardMult = c => algaeMult(CLEAN.hard, c);
+
 /* ---------------- 日の出・日没(東京、NOAA の式、太陽高度 −0.833°) ---------------- */
 const LAT = 35.6895, LON = 139.6917, RAD = Math.PI / 180;
 function solarMinutesUTC(ms){ // ms 時点の太陽の赤緯・均時差から、その UTC 日の日の出・日没(UTC 0:00 からの分)を返す
@@ -80,7 +89,8 @@ export let agingOn = true;
 export let dirt = 0, algaeGlass = 0, algaeHard = 0, clog = 0, growth = 0;
 export let DO = 8.2;                  // initAging() で DOsat(25) に設定
 export let lastClean = 0, lastFilter = 0; // epoch ms(initAging() で起動時刻に設定)
-export let sinceClean = 0;            // 清掃からの ON 秒数(algaeGlass はここから逆算)
+export let sinceClean = 0;            // 清掃からの ON 秒数
+export let glassAge = 0;              // ガラスの苔の「実効」秒数(dt × glassMult の積算。algaeGlass はここから逆算。生体 0 なら sinceClean と同じ)
 let saveAcc = 0, pending = null;      // pending:メンテを実施したときの案内用({cleaned, filtered})
 let frozenSave = false, loadedRaw;    // ?aging 付きで開いている間は、保存データの aging を読み込んだ元の値のまま書き戻す
 
@@ -88,12 +98,12 @@ const glassOf = s => clamp((s - RATE.glassLagSec) / RATE.glassRiseSec, 0, 1);
 const num = (v, d, a, b) => typeof v === "number" && Number.isFinite(v) ? clamp(v, a, b) : d;
 
 function setDefaults(now){
-  dirt = algaeGlass = algaeHard = clog = growth = 0; sinceClean = 0;
+  dirt = algaeGlass = algaeHard = clog = growth = 0; sinceClean = glassAge = 0;
   DO = DOsat(25); lastClean = lastFilter = now; saveAcc = 0;
 }
 /* 保存用の生オブジェクト */
 export function serializeAging(){
-  return { on: agingOn, dirt, algaeHard, clog, growth, sinceClean, DO, lastClean, lastFilter };
+  return { on: agingOn, dirt, algaeHard, clog, growth, sinceClean, glassAge, DO, lastClean, lastFilter };
 }
 /* 保存された生オブジェクトを読み込む(欠けている・壊れている項目は既定値)。now は既定の last* に使う */
 export function restoreAging(raw, now){
@@ -102,7 +112,7 @@ export function restoreAging(raw, now){
   try {
     agingOn = raw.on !== false;
     dirt = num(raw.dirt, 0, 0, 1); algaeHard = num(raw.algaeHard, 0, 0, 1); clog = num(raw.clog, 0, 0, 1); growth = num(raw.growth, 0, 0, 1);
-    sinceClean = num(raw.sinceClean, 0, 0, 1e9); algaeGlass = glassOf(sinceClean);
+    sinceClean = num(raw.sinceClean, 0, 0, 1e9); glassAge = num(raw.glassAge, sinceClean, 0, 1e9); algaeGlass = glassOf(glassAge); // 旧保存データ(glassAge なし)は sinceClean と同じ
     DO = num(raw.DO, DOsat(25), 0, 20);
     lastClean = num(raw.lastClean, now, 0, 1e15); lastFilter = num(raw.lastFilter, now, 0, 1e15);
   } catch (e) { setDefaults(now); agingOn = true; }
@@ -124,7 +134,7 @@ export function setAgingState(p){
   if ("DO" in p) DO = Math.max(0, p.DO);
   if ("lastClean" in p) lastClean = p.lastClean;
   if ("lastFilter" in p) lastFilter = p.lastFilter;
-  if ("algaeGlass" in p) { algaeGlass = clamp(p.algaeGlass, 0, 1); sinceClean = RATE.glassLagSec + algaeGlass * RATE.glassRiseSec; if (algaeGlass === 0) sinceClean = 0; }
+  if ("algaeGlass" in p) { algaeGlass = clamp(p.algaeGlass, 0, 1); sinceClean = RATE.glassLagSec + algaeGlass * RATE.glassRiseSec; if (algaeGlass === 0) sinceClean = 0; glassAge = sinceClean; }
 }
 /* ---------------- 確認用パラメータ ?aging=dirt:1,algaeGlass:1,algaeHard:1,clog:1,growth:1,DO:2 ----------------
    項目は任意の部分集合。dirt・algaeGlass・algaeHard・clog・growth は 0〜1、DO は mg/L(0〜20)。範囲外の数値は範囲内へ丸め、
@@ -159,12 +169,13 @@ export function setAgingOn(v){ agingOn = !!v; save(); }
 export function resetAging(now){ const on = agingOn; setDefaults(now); agingOn = on; pending = null; save(); }
 
 /* ---------------- 毎フレームの更新 ---------------- */
-/* dt:実時間の秒。env = { load, T }(load:魚の呼吸量、T:水温)。OFF なら何も変えない(DO も凍結) */
+/* dt:実時間の秒。env = { load, T, counts }(load:魚の呼吸量、T:水温、counts:種ごとの数(省略なら生体 0 とみなす))。OFF なら何も変えない(DO も凍結) */
 export function updateAging(dt, env){
   if (!agingOn || !(dt > 0)) return;
   dirt = Math.min(1, dirt + dt / RATE.dirtSec);
-  sinceClean += dt; algaeGlass = glassOf(sinceClean);
-  algaeHard = Math.min(1, algaeHard + dt / RATE.hardSec);
+  const c = env && env.counts;
+  sinceClean += dt; glassAge += dt * glassMult(c); algaeGlass = glassOf(glassAge);
+  algaeHard = Math.min(1, algaeHard + dt * hardMult(c) / RATE.hardSec);
   clog = Math.min(1, clog + dt / RATE.clogSec);
   growth = Math.min(1, growth + dt / RATE.growthSec);
   if (env && Number.isFinite(env.load) && Number.isFinite(env.T)) {
@@ -182,7 +193,7 @@ export function checkMaintenance(now, T = Tw){
   if (!agingOn || frozenSave) return null; // ?aging 付きの間は、指定した状態がメンテで消えないよう何もしない
   const done = { cleaned: false, filtered: false };
   if (now - lastClean >= CLEAN_INTERVAL_MS) {
-    dirt = 0; algaeGlass = 0; sinceClean = 0; algaeHard *= 0.6; DO = DOsat(T); lastClean = now; done.cleaned = true;
+    dirt = 0; algaeGlass = 0; sinceClean = 0; glassAge = 0; algaeHard *= 0.6; DO = DOsat(T); lastClean = now; done.cleaned = true;
   }
   if (now - lastFilter >= FILTER_INTERVAL_MS) {
     clog = 0; growth = 0; lastFilter = now; done.filtered = true;
