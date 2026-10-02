@@ -13,12 +13,14 @@
 | `js/species.js` | `SPECIES`、`ORDER`、色バリエーション(`GUPPY_COL`、`PLATY_COL`)、ポップアップの説明文 `NOTES` と体長 `POP_L`。ほかに依存しない |
 | `js/core.js` | ユーティリティ(`TAU`、`clamp`、`lerp`、`mulberry`、`noise1`、`mix`)、`W` `H` `U` `DPR` `waterTop`、`ctx`、`Tset` `Tw` `timeScale` `nightOn` `nightT`、`counts`、保存と復元、`sandY` `bottomY` `current`、セッター |
 | `js/aging.js` | 時間経過の状態モデル(汚れ・苔・目詰まり・水草の成長・溶存酸素・メンテ・日の出日没)。`agingOn`、`dirt` `algaeGlass` `algaeHard` `clog` `growth` `DO` `lastClean` `lastFilter` `sinceClean`、`updateAging`、`checkMaintenance`、`onVisibility`、`DOsat` `hypoxia` `DOeq`、`sunTimes` `lightPhase` `autoLightStep`、`noticeMessage`。トップレベルで乱数・Canvas・`Date` を使わない |
-| `js/fish-render.js` | 描画ヘルパ、`BASE_A`、`EYE`、`PAINT`、`drawFish` |
-| `js/fish-behavior.js` | `fishes`、`schools`、`makeFish`、`syncFish`、`baseZone`(種の層を上下に広げる)、`effectiveZone`、`updateHealth`、`updateSchools`、`updateFish` |
-| `js/scene.js` | `buildScene`、`makeStatic`、水草・流木・岩・浮草の描画、時間経過の見た目(`buildAging`・`ensureAging`・`drawAgingGlass`・`drawAgingHard`)、コースティクス・光の筋・水面(光の素材は `buildLight` で作り置き)、温度計、24時間計(`clockHourAngle`、`drawClock`、位置を返す `clockGeom`。オフのときはグレー表示)、酸素メーター(`o2NeedleAngle`、`drawO2Meter`、`meterGeom`、作り置きの `buildMeter`)、LED・色調補正・ガラス、エアストーン・泡・粒子 |
+| `js/fish-render.js` | 描画ヘルパ、`BASE_A`、`EYE`、`PAINT`(お掃除生体の横向きの姿を含む)、`drawFish`、お掃除生体用の `GROUND`・`drawCreature`・`drawSnailFront`・`paintSnailFront`(前面ガラスの貝の足の裏) |
+| `js/fish-behavior.js` | `fishes`、`schools`、`makeFish`、`syncFish`、`baseZone`(種の層を上下に広げる)、`effectiveZone`、`updateHealth`、`updateSchools`(`solo` の種は飛ばす)、`updateFish`、`activity`(コリドラスの砂つつき=砂煙もここ) |
+| `js/crawlers.js` | お掃除生体(オト・エビ・貝)の這える面(砂・岩・流木・ガラス)、位置と動きの状態機械 `updateCrawler`、描画の呼び出し `drawCrawlers(layer)`、`relayout`、読み取り用の `grazers`(なめた跡の位置)・`crawlerPos`・`glassBand`、数値 `CRAWL`。トップレベルで乱数・Canvas・`Date` を使わない |
+| `js/governor.js` | 性能による切り替え(`GOV`、`govTick`、`govGrace`、`govState`、`trailStrength`、テスト用の `govReset`)。ほかに依存しない |
+| `js/scene.js` | `buildScene`、`makeStatic`、水草・流木・岩・浮草の描画、時間経過の見た目(`buildAging`・`ensureAging`・`drawAgingGlass`・`drawAgingHard`)、なめた跡(`updateTrails`・`TRAIL`・`trailState`)、コリドラスの砂煙(`FX`・`spawnPuff`・`updatePuffs`・`drawPuffs`)、`getWood`(流木の点列の読み取り)、コースティクス・光の筋・水面(光の素材は `buildLight` で作り置き)、温度計、24時間計(`clockHourAngle`、`drawClock`、位置を返す `clockGeom`。オフのときはグレー表示)、酸素メーター(`o2NeedleAngle`、`drawO2Meter`、`meterGeom`、作り置きの `buildMeter`)、LED・色調補正・ガラス、エアストーン・泡・粒子 |
 | `js/popup.js` | 拡大ポップアップ(`P`、`startAct`、`updatePop`、`drawPop`、`openPop` / `closePop`) |
 | `js/ui.js` | パネル、全画面表示、`updatePanel`、時計ボタン(`layoutClockBtn`)・照明の自動化(`autoLightTick`)・メンテの案内(`showNoticeIfAny`)・水槽のリセット |
-| `js/perf.js` | `?perf` のときだけ有効な性能計測(`PERF`、`perfBegin` / `perfMark` / `perfEnd` / `perfFrame` / `perfReport`)。ほかに依存しない |
+| `js/perf.js` | `?perf` のときだけ有効な性能計測(`PERF`、`perfBegin` / `perfMark` / `perfEnd` / `perfFrame` / `perfReport`。表示に `governor.js` の状態 `trail on/fading/off` と 3 秒平均を出す)。`governor.js` にだけ依存する |
 | `js/main.js` | `draw`、`loop`、`resize`、開始処理。エントリポイント |
 
 ### import の向き
@@ -29,12 +31,14 @@
 | `core.js` | species |
 | `aging.js` | core、species |
 | `fish-render.js` | core、species |
-| `scene.js` | core、aging(`agingOn`。酸素メーターの針は `DO`。時計のグレー表示。`dirt`・`algaeGlass`・`algaeHard`・`clog`・`growth`。汚れ・苔・水草の見た目) |
-| `fish-behavior.js` | core、species、aging(`DO`、`hypoxia`)、scene(`spawnBubble`) |
+| `scene.js` | core(`counts` も)、aging(`agingOn`。酸素メーターの針は `DO`。時計のグレー表示。`dirt`・`algaeGlass`・`algaeHard`・`clog`・`growth`。汚れ・苔・水草の見た目。なめた跡の戻りは `glassMult`・`hardMult`・`RATE`・`sinceClean`) |
+| `fish-behavior.js` | core、species、aging(`DO`、`hypoxia`)、scene(`spawnBubble`、`spawnPuff`、`FX`) |
+| `crawlers.js` | core、species、aging(`DO`、`hypoxia`)、scene(`rocks`、`getWood`)、fish-render、fish-behavior(`fishes`、`activity`) |
+| `governor.js` | (なし) |
 | `popup.js` | core、species、fish-render |
 | `ui.js` | core、species、aging、fish-render、fish-behavior、popup、scene(`clockGeom`)、**main(`resize`)** |
-| `perf.js` | (なし) |
-| `main.js` | すべて(`perf.js` を含む) |
+| `perf.js` | governor |
+| `main.js` | すべて(`crawlers.js`・`governor.js`・`perf.js` を含む) |
 
 - `aging.js` の依存は core と species だけ。scene・fish-behavior・ui・main が aging を import する。core は aging を import せず、保存の統合は登録口(`setExtraSave`)で行う(下の「保存の統合」)。
 - 基本は一方向。例外は `ui.js` → `main.js`(`resize`)だけで、ここは循環 import になる。`resize` は関数宣言で、`ui.js` の中では関数の実行時にしか呼ばないので、評価順(TDZ)の問題は起きない。
@@ -42,7 +46,7 @@
 
 ### モジュールの評価順
 
-`main.js` の import 順に、species → core → aging → fish-render → scene → fish-behavior → popup → ui が評価され、最後に `main.js` の本体(開始処理)が走る。これは元の単一ファイルでの実行順(状態 → 情景の Canvas `cc` の生成 → ポップアップ → パネル → 開始)と同じにしてある。トップレベルで Canvas や乱数を使う処理は、この順序に依存する(描画ログの基準と一致させるため)。
+`main.js` の import 順に、species → core → aging → fish-render → scene → fish-behavior → crawlers → governor → popup → ui が評価され(`crawlers.js` を最初に import する `main.js` の行が、その依存の scene・fish-behavior を先に評価させる)、最後に `main.js` の本体(開始処理)が走る。これは元の単一ファイルでの実行順(状態 → 情景の Canvas `cc` の生成 → ポップアップ → パネル → 開始)と同じにしてある。トップレベルで Canvas や乱数を使う処理は、この順序に依存する(描画ログの基準と一致させるため)。
 
 ### 共有変数の書き換え(セッター)
 
@@ -88,10 +92,12 @@ GitHub Pages(サブパス配信)に置き、Safari の「ホーム画面に追�
 loop(毎フレーム)
  ├─ nightT を照明の目標へ補間
  ├─ 水温 Tw を設定温度へ近づける
- ├─ updateSchools → 各魚の updateHealth / updateFish
- ├─ updateBubbles
- ├─ updateAging(dt, { load: 魚の呼吸量の和, T: Tw })   ← 魚の更新の後。オフなら何もしない
+ ├─ updateSchools → 各魚の updateHealth と、updateFish(お掃除生体は updateCrawler)
+ ├─ updateBubbles、updatePuffs(砂煙)
+ ├─ updateAging(dt, { load: 魚の呼吸量の和, T: Tw, counts })   ← 魚の更新の後。オフなら何もしない
+ ├─ updateTrails(dt, grazers(), trailStrength())   ← なめた跡(見た目の層)
  ├─ draw()
+ ├─ govTick(logic+draw の所要 ms, 実経過秒)   ← 性能による切り替え。loop の先頭から ここまでを performance.now() で測る
  ├─ 15 フレームごとに updatePanel()
  └─ 約 1 秒ごと(経過秒の累計が 1 を超えたとき)に autoLightTick(Date.now())
 
@@ -109,6 +115,21 @@ loop(毎フレーム)
 - **メンテと案内**:`checkMaintenance(now)` が実日付で状態を戻し、実施内容を `pending` に記録する。`ui.js` の `showNoticeIfAny()` が `takeNotice()` を `noticeMessage` で文言にして、`#notice`(`role="status"`、全画面の案内 `.fshint` と同じ見た目)に約 3 秒表示する。
 - **保存の統合**:`core.js` の `save()` が `{ counts, T, night }` に、`setExtraSave(fn)` で登録された `fn()` の結果を混ぜる(循環 import を避けるための登録口)。`aging.js` の `initAging(now)` が `core.js` の `getSavedRaw()` から `aging` を読み、`restoreAging` で復元(欠損・破損は既定値)して、`setExtraSave` で `{ aging: serializeAging() }` を登録する。
 - **visibilitychange / pagehide**:`main.js` が登録する。`hidden` になったとき `onVisibility(true, now)` が `checkMaintenance` を実施して `save()`。`visible` に戻ったときは `checkMaintenance` を再度判定し、`showNoticeIfAny()` で案内を出す。`pagehide` では `save()`。
+
+## お掃除生体(`crawlers.js`・`governor.js`)
+
+- オト・エビ・貝(`SPECIES` の `solo: true`)は `fishes` に入る(数・体調・呼吸量・パネルは魚と同じ)が、`loop` は `updateFish` の代わりに `updateCrawler` を呼び、`draw()` の魚の描画ループ(奥・手前)にも入れない(`sorted` は `solo` を除く)。各個体の状態は `f.cr`(面の種類 `surf`・面の番号・位置・状態 `st`・タイマ・フェードなど)に持つ。
+- 面は `relayout()`(`resize()` の `buildScene()` の後)が `scene.js` の `rocks`・`getWood()` の点列から作る。位置は「面の種類・番号・位置(0〜1)」で持つので、resize 後もそのまま使える。
+- **描画は 4 つの層**(`drawCrawlers(layer)`):`back`(奥のガラスのオト)、`low`(岩・砂・流木の上の 3 種)、`front`(移動中のオト)、`glass`(前面ガラスの貝とオト)。差し込み位置は下の「描画順」。砂煙(`drawPuffs`)は手前の魚の直後。
+- 前面ガラスの貝とオトの「いま」は `grazers()` で読める(なめた跡用)。位置を知りたいときは `crawlerPos(f)`。
+- **なめた跡**(`scene.js`):状態 `tr`(`mw`・`mh`:マスクの大きさ、`glass`・`hard`:世代マスク `{ b: 世代ごとのキャンバス, head, prog, any, quiet }`、`cache`:跡あり版の作り置き `{ gA, gB, h[3] }`)。マスクは水槽の 1/4 の解像度で、新品では作らず、跡を付ける最初のときに作る。`buildAging()`(resize)で捨てる。苔の状態が下がったとき(清掃・リセット・`?aging` 後の変更)、`trailStrength()` が 0 になったとき(off)にも捨てる。
+- **性能による切り替え**(`governor.js`):状態は `mode`(`on` → `fading` → `off`)・`fade`(強さ)・猶予・3 秒窓の標本。`off` は戻らない。`updateTrails` は強さ(`trailStrength()`)を受け取り、`fading` の間は跡あり版を濃さを下げて作り直す。
+- **不変条件**
+  - 跡は見た目だけの層で、苔の量(`algaeGlass`・`algaeHard`)を一切変えない。保存もしない。
+  - 跡の更新で `getImageData` / `putImageData` を使わない(マスクはキャンバスへの描画と `drawImage` だけ)。新品(苔 0.002 未満)では、マスクもキャッシュも作らず、描画命令を出さない。
+  - 性能による `off` はそのセッションの間は戻さない。起動・resize・表示復帰の直後 3 秒と hidden の間は判定しない。
+  - 新しい種の数が 0 のとき、お掃除生体の更新・描画で乱数も描画命令も出ない(既存の描画ログと一致する)。砂煙は `FX.puff` が false なら乱数も使わない。
+- 状態(`aging.js`):ガラスの苔は実効秒 `glassAge`(`dt × glassMult` の積算)から逆算する。`sinceClean` は従来どおり実秒。`updateAging` の `env` に `counts` を渡す(省略は生体 0 とみなす)。
 
 ## 座標系と単位
 
@@ -134,7 +155,11 @@ loop(毎フレーム)
 | `agingOn` | 時間の経過のオン/オフ(`aging.js`。書き換えは `setAgingOn`) |
 | `dirt` / `algaeGlass` / `algaeHard` / `clog` / `growth` | 汚れ・ガラスの苔・岩と流木の苔・目詰まり・水草の成長(0〜1。`aging.js` が所有し、`updateAging` と `checkMaintenance` が更新)。`sinceClean` は清掃からのオン秒数で、`algaeGlass` はここから逆算する |
 | `DO` | 溶存酸素 mg/L(`aging.js`) |
+| `glassAge` | ガラスの苔の実効秒(`aging.js`。お掃除生体で遅くなる。保存する) |
 | `lastClean` / `lastFilter` | 前回の水替え・清掃/フィルター掃除の実時刻(epoch ms。`aging.js`) |
+| `f.cr` | お掃除生体の位置・状態(`crawlers.js`) |
+| なめた跡 `tr` | 跡マスク(世代ごとのキャンバス)と跡あり版の作り置き(`scene.js`。保存しない) |
+| `GOV` の `mode` / `fade` | 性能による切り替えの状態(`governor.js`。保存しない) |
 | `nightOn` / `nightT` | 夜モードの目標 / 補間中の値(0=昼, 1=夜) |
 | `plants`, `rocks`, `wood`, `moss`, `floats`, `rays`, `motes`, `glints`, `orbs` | `buildScene()` が作る情景 |
 | `staticLayer` / `staticNight` | 昼/夜の静的背景(水のグラデーション、遠景のぼかし、砂)。オフスクリーン Canvas |
@@ -149,16 +174,16 @@ loop(毎フレーム)
 3. 奥の水草(透明度 0.78)
 4. 霞(奥を少しかすませる)
 5. エアストーンと泡
-6. 奥の魚(`z < 0.45`)
+6. 奥の魚(`z < 0.45`)→ **奥のガラスに吸いついたオト**(`drawCrawlers("back")`)
 7. 薄い霞
-8. 流木 → 岩 → こけ → 岩・流木の苔(`drawAgingHard()`。新品では何も描かない)→ 中景の草(シダ、タイガーロータス、アマゾンソード)
-9. 手前の魚(`z ≥ 0.45`)
+8. 流木 → 岩 → こけ → 岩・流木の苔(`drawAgingHard()`。新品では何も描かない)→ **岩・砂・流木の上の貝・エビ・オト**(`drawCrawlers("low")`)→ 中景の草(シダ、タイガーロータス、アマゾンソード)
+9. 手前の魚(`z ≥ 0.45`)→ **移動中のオト**(`drawCrawlers("front")`)→ **コリドラスの砂煙**(`drawPuffs()`)
 10. 前景の草(ヘアーグラス、小さな葉の絨毯)
 11. 浮草(根と影を含む)
 12. 漂う粒子と玉ボケ(玉ボケは作り置きの画像)
 13. コースティクス(2 層のテクスチャを流して `screen`。水中全体と、砂の上にもう一度)
 14. 水面と部屋、水面のきらめき(20 個)
-15. ガラスの汚れ・苔(`drawAgingGlass()`。水面の後・色調補正の前なので、照明の色調がかかる。新品では何も描かない)
+15. ガラスの汚れ・苔(`drawAgingGlass()`。水面の後・色調補正の前なので、照明の色調がかかる。新品では何も描かない。なめた跡があれば、跡あり版の苔を描く)→ **前面ガラスの貝・オト**(`drawCrawlers("glass")`。苔の上、色調補正の前)
 16. 色調補正(`grade()`。昼はソフトライトと光だまり。夜は `nightGrade()` で暗幕の乗算 1 回とソフトライト 1 回)
 17. LED 照明の器具
 18. 温度計
@@ -166,7 +191,7 @@ loop(毎フレーム)
 20. 酸素メーター(`drawO2Meter()`。時計の直後、ガラスの前。文字盤は `buildMeter()` が作り置き。毎フレームは `drawImage` と針だけ。`?perf` の区間名は `o2meter`)
 21. ガラスの映り込みと周辺減光
 
-`?perf` の区間名は `agingGlass`(上の 15。`surface` と `grade` の間)。岩・流木の苔は `midground` に含まれる。水草の成長(ロタラ・バリスネリア・浮草)と、ソードの黄ばみ・縁の点は、各水草の描画関数の中で状態を読み取るだけで、描画順は変わらない。
+`?perf` の区間名は `agingGlass`(上の 15。`surface` と `grade` の間。前面ガラスの貝・オトの描画を含む)。お掃除生体の描画 `low` `back` `front` は、それぞれ `midground` `backFish` `frontFish` に含まれる。岩・流木の苔は `midground` に含まれる。水草の成長(ロタラ・バリスネリア・浮草)と、ソードの黄ばみ・縁の点は、各水草の描画関数の中で状態を読み取るだけで、描画順は変わらない。
 
 ## 魚の描き方
 
@@ -174,6 +199,7 @@ loop(毎フレーム)
 - `drawFish(f)` が、位置・向き(`flip` の符号で左右反転、絶対値で振り向きの薄さ)・傾き(`pitch + tilt`)・透明度(`BASE_A = SPECIES.alpha`)を設定してから `PAINT` を呼ぶ。
 - 共通の部品:`bodyPath`、`forkTail`、`fanTail`、`fin`、`withTail`(尾の振りとしなり)、`shade`(上からの光・背中の艶・弱ったときの色あせ・縁の光)、`finRays`、`eye`、`pectoral`。
 - 使う変数は `f.phase`、`f.pale`、`f.health`、`f.spots`、`f.variant`、`f.ox`、`f.tailScale`(グッピーのみ)。
+- お掃除生体の `PAINT`(`oto`・`shrimp`・`snail`)も横向き(頭が +x)。足元までの距離は `GROUND`(体長の倍率)。`drawCreature` が位置・角度・向き・透明度を設定して呼ぶ。エビは `f.pick`・`f.clawT`・`f.wash`・`f.hold`(前脚の動き)、貝は `f.hide`(殻に引っこむ度合い)を読む(ポップアップが設定する)。前面ガラスの貝は別の描画 `paintSnailFront`(足の裏と口)。
 
 ## 水草の揺れ
 
@@ -191,6 +217,7 @@ loop(毎フレーム)
 ## ポップアップ(`P`)
 
 - 論理サイズ 304×190。`ctx` と `U` を一時的に差し替えて `PAINT` を再利用する。
+- お掃除生体は、底を這う(貝・エビ)・水中に吸いつく(オト)動きと、種ごとの仕草の候補(`POOLS`)を使い、魚用の泳ぎ回りは当てない。固有の仕草は `hide`・`flip`・`glassview`(貝)、`wash`・`backhop`・`hug`(エビ)、`graze`・`flow`・`pakupaku`(オト)。貝の `glassview` は `P.gv`(クロスフェード)で前面ガラスの姿へ切り替える。
 - 仕草は状態機械:`pickAct()` で選び、`startAct(name)` で初期化、`updatePop()` の `switch` で進め、`endAct()` で漂う状態に戻る。
 - 視線は `EYE = { dx, dy, roll }` を描画の間だけ設定して `eye()` に渡す。`roll` はコリドラスのウインク用。
 - 開閉:`bindPop` がアイコンに紐づける。マウスは pointerenter / pointerleave で開閉し、外に出たら `pointermove` の判定で必ず閉じる。タッチ(iPad/iPhone)はタップで開閉する。Safari では `click` の `pointerType` が当てにならないため、直前の `pointerdown` の種別で判定する(T8。実機で確認済み)。
@@ -203,8 +230,9 @@ loop(毎フレーム)
 
 ## 確認手順
 
-1. `npm test`:ブラウザなしで実行時エラー・NaN・体調モデル・ポップアップの詰まり・餌を食べられるかを確かめる(所要 約 30 秒)。Canvas と DOM のモックをグローバルに置いてから `js/main.js` を import する方式で、内部状態には各モジュールの export 経由でアクセスする。
+1. `npm test`:ブラウザなしで実行時エラー・NaN・体調モデル・ポップアップの詰まり・餌を食べられるか・お掃除生体の動き(2 分間のシミュレーションを含む)・なめた跡と性能による切り替えを確かめる(所要 約 80 秒)。Canvas と DOM のモックをグローバルに置いてから `js/main.js` を import する方式で、内部状態には各モジュールの export 経由でアクセスする。
    - 見た目を変えない変更(分割・整理など)では、`npm run drawlog` も実行する。描画命令の列を `tests/baseline/` の基準ログと比べ、一致すれば描画結果は同一(所要 約 40〜50 秒)。基準の `drawlog.log.gz` はリポジトリ外で、ハッシュ `drawlog.sha256` だけを管理する。
+   - お掃除生体が入った現在の `npm run drawlog` は、基準ログ(新種なし)と一致しない(パネルに新種のアイコンが加わるため)。確認するときは、新種を ORDER から外し(`species.ORDER.length = 6`)、砂煙を切り(`scene.FX.puff = false`)、性能の測定を固定(`governor.GOV.override = 0`)したハーネスで比べる。基準の取り直しは、見た目を人間が了承した後に行う(`node tests/drawlog.mjs --record`)。
    - `drawlog` は 24時間計が現在時刻に依存するため、`TZ=UTC`・固定時刻 6:30(UTC)で実行する。実行環境のタイムゾーンや時刻に描画ログが左右されない。
    - 群れの形を確かめるときは `npm run school`。
 2. `npm run serve` → `http://localhost:8000/`:見た目と操作を確認する(`file://` では開けない)。チェックしたい点の例:
