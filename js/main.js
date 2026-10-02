@@ -2,10 +2,10 @@
 // このファイルがエントリポイント。全モジュールの評価が終わってから、末尾の「開始」が実行される。
 import { DPR, H, save, Tset, Tw, W, clamp, ctx, cv, nightOn, nightT, setDPR, setH, setNightT, setTw, setU, setW, setWaterTop, tankEl, timeScale, waterTop } from "./core.js";
 import { ORDER } from "./species.js";
-import { checkMaintenance, fishLoadOf, initAging, onVisibility, updateAging } from "./aging.js";
+import { applyAgingParam, checkMaintenance, fishLoadOf, initAging, onVisibility, updateAging } from "./aging.js";
 import { drawFish } from "./fish-render.js";
 import { fishes, schools, syncFish, updateFish, updateHealth, updateSchools } from "./fish-behavior.js";
-import { bubbles, buildScene, drawBubbles, drawCarpet, drawCaustics, drawClock, drawFern, drawFixture, drawFloats, drawGlass, drawLotus, drawMoss, drawMotes, drawRays, drawRibbon, drawRock, drawStem, drawSurface, drawSword, drawThermometer, drawWood, grade, plants, rocks, staticLayer, staticNight, updateBubbles } from "./scene.js";
+import { bubbles, buildScene, drawBubbles, drawCarpet, drawAgingGlass, drawAgingHard, drawCaustics, drawClock, drawFern, drawFixture, drawFloats, drawGlass, drawLotus, drawMoss, drawMotes, drawRays, drawRibbon, drawRock, drawStem, drawSurface, drawSword, drawThermometer, drawWood, grade, plants, rocks, staticLayer, staticNight, updateBubbles } from "./scene.js";
 import { autoLightTick, layoutClockBtn, showNoticeIfAny, updatePanel } from "./ui.js";
 import { PERF, perfBegin, perfEnd, perfFrame, perfMark, perfReport } from "./perf.js";
 
@@ -34,6 +34,7 @@ function draw(){
   ctx.globalAlpha = 0.94; drawWood();
   ctx.globalAlpha = 0.9; rocks.forEach(drawRock);
   drawMoss();
+  drawAgingHard();
   ctx.globalAlpha = 0.84;
   plants.mid.forEach(p => p.type === "fern" ? drawFern(p, T) : p.type === "lotus" ? drawLotus(p, T) : drawSword(p, T));
   if (PERF) perfMark("midground");
@@ -54,6 +55,8 @@ function draw(){
   if (PERF) perfMark("caustics");
   drawSurface(T);
   if (PERF) perfMark("surface");
+  drawAgingGlass(); // ガラスの汚れ・苔(色調補正の前:照明の色調がかかる)
+  if (PERF) perfMark("agingGlass");
   grade();
   if (PERF) perfMark("grade");
   drawFixture(T);
@@ -68,7 +71,8 @@ function draw(){
 
 function loop(now){
   if (PERF) perfFrame(now);
-  const dt = Math.min(0.05, (now - last) / 1000); last = now; T += dt; frameNo++;
+  const dt = Math.min(0.05, (now - last) / 1000), realDt = Math.min(1, (now - last) / 1000); last = now; T += dt; frameNo++;
+  // realDt:時間経過用の実経過秒(低 fps でも 1:1。非表示で rAF が止まった間は 1 秒までしか数えない)。他の更新は従来の dt
   const rate = 0.6 * Math.sqrt(timeScale);
   if (Math.abs(Tset - Tw) > 0.001) setTw(Tw + clamp(Tset - Tw, -rate * dt, rate * dt));
   setNightT(clamp(nightT + (nightOn ? dt : -dt) / 1.4, 0, 1));
@@ -77,7 +81,7 @@ function loop(now){
   fishes.forEach(f => { updateHealth(f, dt); updateFish(f, dt); });
   updateBubbles(dt, T);
   let load = 0; for (const f of fishes) load += fishLoadOf(f.sp, f.scale);
-  updateAging(dt, { load, T: Tw });
+  updateAging(realDt, { load, T: Tw });
   if (PERF) perfEnd("logic");
   draw();
   if (PERF) perfReport(cv, DPR, fishes.length);
@@ -102,6 +106,7 @@ export function resize(){
 
 /* ---------------- 開始 ---------------- */
 initAging(Date.now());
+applyAgingParam(typeof location !== "undefined" ? location.search : ""); // ?aging=... のときだけ状態を指定(無指定は何もしない)
 checkMaintenance(Date.now());
 resize();
 syncFish();

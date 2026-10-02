@@ -44,6 +44,17 @@ if (childMode === "load") {
   process.exit(0);
 }
 
+if (childMode === "param") { // ?aging 付きで起動 → 状態指定 → 時間経過・ON/OFF 切り替え・保存。保存データの aging が元のままか調べる
+  const written = installMocks(process.env.AGING_LS);
+  const core = await imp("core.js"), ag = await imp("aging.js");
+  ag.initAging(1700000000000);
+  const applied = ag.applyAgingParam(process.env.AGING_Q, 1700000000000);
+  ag.updateAging(30, { load: 1, T: 25 }); ag.setAgingOn(false); ag.setAgingOn(true); ag.checkMaintenance(1700000000000 + 90 * 86400000);
+  core.setTset(30); core.save();
+  console.log(JSON.stringify({ stored: JSON.parse(written.v), applied: !!applied, state: { dirt: ag.dirt, algaeGlass: ag.algaeGlass, algaeHard: ag.algaeHard, clog: ag.clog, growth: ag.growth, DO: ag.DO } }));
+  process.exit(0);
+}
+
 /* ================= 親プロセス ================= */
 const written = installMocks(null);
 const ag = await imp("aging.js");
@@ -188,6 +199,33 @@ const child = (mode, env = {}) => {
   check("保存と復元:aging の中身が壊れていても既定値/範囲内で起動", !r4.error && r4.aging.dirt === 0 && r4.aging.clog === 1 && r4.aging.lastClean === 1700000000000, r4.error || JSON.stringify(r4.aging));
   const r5 = child("load", { AGING_LS: JSON.stringify({ aging: "oops" }) });
   check("保存と復元:aging が文字列でも既定値で起動", !r5.error && r5.aging.dirt === 0, r5.error || "");
+}
+
+/* --- ?aging(確認用パラメータ) --- */
+{
+  const P = q => ag.parseAgingParam(q);
+  const full = P("?aging=dirt:1,algaeGlass:0.5,algaeHard:1,clog:0.25,growth:1,DO:2");
+  check("?aging の解析:全項目(DO は mg/L)", JSON.stringify(full?.values) === JSON.stringify({ dirt: 1, algaeGlass: 0.5, algaeHard: 1, clog: 0.25, growth: 1, DO: 2 }), JSON.stringify(full));
+  const part = P("?perf&aging=growth:0.4,dirt:0.1#x");
+  check("?aging の解析:部分集合・他のパラメータと併用・ハッシュ付き", JSON.stringify(part?.values) === JSON.stringify({ growth: 0.4, dirt: 0.1 }), JSON.stringify(part));
+  check("?aging の解析:URL エンコード(%3A・%2C)", JSON.stringify(P("?aging=dirt%3A1%2Cclog%3A0.5")?.values) === JSON.stringify({ dirt: 1, clog: 0.5 }));
+  check("?aging の解析:無指定・名前違いは null(何もしない)", P("") === null && P("?perf") === null && P("?agingx=dirt:1") === null && P("?x=aging") === null && P(undefined) === null);
+  const bad = P("?aging=foo:1,dirt:x,clog,growth:0.5:1,:1,algaeHard:,DO:1e3,algaeGlass:0.3");
+  check("?aging の解析:不正な項目は項目ごとに無視(未知の名前・数値でない・形式違い・空)", JSON.stringify(bad?.values) === JSON.stringify({ algaeGlass: 0.3 }), JSON.stringify(bad));
+  const clamped = P("?aging=dirt:5,clog:-2,DO:99,growth:.5");
+  check("?aging の解析:範囲外の数値は範囲内へ丸める(0〜1、DO は 0〜20)", JSON.stringify(clamped?.values) === JSON.stringify({ dirt: 1, clog: 0, DO: 20, growth: 0.5 }), JSON.stringify(clamped));
+  check("?aging の解析:値なし(?aging / ?aging=)・壊れたエンコードは指定あり・状態は変えない", JSON.stringify(P("?aging")) === '{"values":{}}' && JSON.stringify(P("?aging=")) === '{"values":{}}' && JSON.stringify(P("?aging=%E0%A4%A")) === '{"values":{}}');
+  const q = "?aging=dirt:1,algaeGlass:1,algaeHard:1,clog:1,growth:1,DO:2";
+  const orig = { on: false, dirt: 0.25, algaeHard: 0.5, clog: 0.1, growth: 0.3, sinceClean: 5000, DO: 6.5, lastClean: 1699000000000, lastFilter: 1690000000000 };
+  const ls = JSON.stringify({ counts: { neon: 7 }, T: 27, night: true, aging: orig });
+  const r = child("param", { AGING_LS: ls, AGING_Q: q });
+  check("?aging 付き:状態が指定どおりになる", !r.error && r.applied && r.state.dirt === 1 && r.state.algaeGlass === 1 && r.state.clog === 1 && r.state.growth === 1 && r.state.DO > 0, r.error || JSON.stringify(r.state));
+  check("?aging 付きで保存しても、保存データの aging は読み込んだ元の値のまま(counts・T は通常どおり保存)",
+    !r.error && JSON.stringify(r.stored.aging) === JSON.stringify(orig) && r.stored.T === 30 && r.stored.counts.neon === 7, r.error || JSON.stringify(r.stored.aging));
+  const r2 = child("param", { AGING_LS: JSON.stringify({ counts: { neon: 7 } }), AGING_Q: q });
+  check("?aging 付き:保存データに aging がなければ、aging は書かれないまま", !r2.error && !("aging" in r2.stored) && r2.stored.T === 30, r2.error || JSON.stringify(r2.stored));
+  const r3 = child("param", { AGING_LS: ls, AGING_Q: "?perf" });
+  check("?aging なしは従来どおり(状態を保存・指定は無視)", !r3.error && !r3.applied && r3.stored.aging && JSON.stringify(r3.stored.aging) !== JSON.stringify(orig) && r3.state.dirt < 0.3, r3.error || JSON.stringify(r3.stored.aging));
 }
 
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて成功");

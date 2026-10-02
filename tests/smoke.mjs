@@ -284,5 +284,72 @@ for (const sp of A.ORDER) {
   A.setTimeScale(20); A.setT(prevT); frames(60 * 10); A.setTimeScale(1); ag.setAgingState({ DO: savedDO });
 }
 
+/* ---------------- A3:時間経過の見た目(汚れ・苔・水草の成長) ---------------- */
+{
+  // tank の ctx に呼び出し回数を数える関数を一時的に載せる(モックの Proxy は、載せた関数をそのまま返す)
+  const KEYS = ["fill", "stroke", "drawImage", "fillRect", "clip", "arc", "ellipse", "moveTo", "lineTo", "quadraticCurveTo", "bezierCurveTo", "beginPath", "putImageData", "createImageData", "createLinearGradient", "createRadialGradient"];
+  const cx = core.ctx;
+  const count = fn => {
+    const n = Object.fromEntries(KEYS.map(k => [k, 0]));
+    for (const k of KEYS) cx[k] = () => { n[k]++; return k.startsWith("create") ? (k === "createImageData" ? { data: new Uint8ClampedArray(4) } : { addColorStop() {} }) : undefined; };
+    let err = null; try { fn(); } catch (e) { err = e; }
+    for (const k of KEYS) delete cx[k];
+    return { n, err, total: Object.values(n).reduce((a, b) => a + b, 0) };
+  };
+  const ALL = v => ({ dirt: v, algaeGlass: v, algaeHard: v, clog: v, growth: v });
+  const sword = scene.plants.mid.find(p => p.type === "sword"), stem = scene.plants.back.find(p => p.type === "stem"), ribbon = scene.plants.back.find(p => p.type === "ribbon");
+  const savedAging = ag.serializeAging();
+
+  ag.setAgingState(ALL(0));
+  const z = count(() => { scene.drawAgingGlass(); scene.drawAgingHard(); });
+  check("A3:全状態 0 では、ガラスの汚れ・苔と岩・流木の苔の描画命令が 1 つも出ない", !z.err && z.total === 0, z.err ? String(z.err) : `命令 ${z.total}`);
+  ag.setAgingState(ALL(0.001));
+  const z2 = count(() => { scene.drawAgingGlass(); scene.drawAgingHard(); });
+  check("A3:0.002 未満の値でも描画命令が出ない", !z2.err && z2.total === 0, `命令 ${z2.total}`);
+
+  ag.setAgingState(ALL(1));
+  const warm = count(() => { scene.drawAgingGlass(); scene.drawAgingHard(); }); // 初回はテクスチャを作る
+  const glass = count(() => scene.drawAgingGlass()), hard = count(() => scene.drawAgingHard());
+  check("A3:全状態 1 で、新しい描画関数が例外なく呼ばれる", !warm.err && !glass.err && !hard.err, warm.err ? String(warm.err) : "");
+  check("A3:全状態 1 の毎フレームは drawImage+fillRect だけ(グラデーション生成・画素計算・パス描画なし)",
+    glass.n.drawImage === 3 && glass.n.fillRect === 1 && hard.n.drawImage === 3 &&
+    ["createLinearGradient", "createRadialGradient", "createImageData", "putImageData", "arc", "ellipse", "lineTo", "fill", "stroke"].every(k => glass.n[k] === 0 && hard.n[k] === 0),
+    `ガラス drawImage ${glass.n.drawImage} + fillRect ${glass.n.fillRect} / 岩・流木 drawImage ${hard.n.drawImage}(全部で ${glass.total + hard.total} 命令)`);
+
+  const rot = { g0: null, g1: null };
+  ag.setAgingState({ growth: 0 }); rot.g0 = count(() => scene.drawStem(stem, 1));
+  ag.setAgingState({ growth: 1 }); rot.g1 = count(() => scene.drawStem(stem, 1));
+  const rb0 = (ag.setAgingState({ growth: 0 }), count(() => scene.drawRibbon(ribbon, 1))), rb1 = (ag.setAgingState({ growth: 1 }), count(() => scene.drawRibbon(ribbon, 1)));
+  check("A3:growth=1 でロタラは節と葉が増え(背が伸びる)、バリスネリアも例外なく描ける", !rot.g1.err && !rb1.err && rot.g1.n.ellipse > rot.g0.n.ellipse && rb1.total > 0,
+    `ロタラの葉 ${rot.g0.n.ellipse / 2}→${rot.g1.n.ellipse / 2} 枚ずつ(左右)`);
+  const fl0 = (ag.setAgingState({ growth: 0 }), count(() => scene.drawFloats(1))), fl1 = (ag.setAgingState({ growth: 1 }), count(() => scene.drawFloats(1)));
+  check("A3:growth=1 で浮草の葉が約 1.5〜1.7 倍(葉 1 枚 = ellipse 3 回)", !fl1.err && fl1.n.ellipse > fl0.n.ellipse * 1.4 && fl1.n.ellipse < fl0.n.ellipse * 1.75, `ellipse ${fl0.n.ellipse}→${fl1.n.ellipse}(${(fl1.n.ellipse / fl0.n.ellipse).toFixed(2)} 倍)`);
+  ag.setAgingState({ ...ALL(0) }); const sw0 = count(() => scene.drawSword(sword, 1));
+  ag.setAgingState({ clog: 1, algaeHard: 1 }); const sw1 = count(() => scene.drawSword(sword, 1));
+  check("A3:アマゾンソードは clog と algaeHard で例外なく描け、縁の点(arc)が出る(0 のときは arc なし)", !sw1.err && sw0.n.arc === 0 && sw1.n.arc > 0, `arc ${sw0.n.arc}→${sw1.n.arc}`);
+  ag.setAgingState({ ...ALL(1), growth: 1 });
+  const allErr = count(() => { scene.plants.back.forEach(p => p.type === "ribbon" ? scene.drawRibbon(p, 2) : scene.drawStem(p, 2)); scene.plants.mid.forEach(p => p.type === "sword" ? scene.drawSword(p, 2) : null); scene.drawFloats(2); }).err;
+  check("A3:全状態 1 で全水草(後景・中景・浮草)が例外なく描ける", !allErr, allErr ? String(allErr) : "");
+  // resize(全画面の代替表示の切り替え)でテクスチャを作り直しても、全状態 1 で描ける
+  A.setPseudo(true); frames(10); A.setPseudo(false); frames(10);
+  const afterResize = count(() => { scene.drawAgingGlass(); scene.drawAgingHard(); });
+  check("A3:resize の後も全状態 1 で描ける", !afterResize.err && afterResize.n.drawImage === 6, `drawImage ${afterResize.n.drawImage}`);
+  ag.restoreAging(null, Date.now()); ag.setAgingState({ dirt: savedAging.dirt, algaeHard: savedAging.algaeHard, clog: savedAging.clog, growth: savedAging.growth });
+}
+
+/* ---------------- 時間経過の dt(実経過秒) ---------------- */
+{
+  const step = ms => { now += ms; const q = rafQ; rafQ = []; q.forEach(f => f(now)); };
+  ag.restoreAging(null, Date.now()); ag.setAgingOn(true); frames(2);
+  const s0 = ag.sinceClean;
+  for (let i = 0; i < 50; i++) step(200);
+  const s1 = ag.sinceClean;
+  step(30000);
+  const s2 = ag.sinceClean;
+  check("時間経過の dt:フレーム間隔 0.2 秒で 10 秒ぶん回すと 10 秒ぶん進む", Math.abs(s1 - s0 - 10) < 1e-6, `${(s1 - s0).toFixed(3)} 秒`);
+  check("時間経過の dt:間隔 30 秒の 1 回は 1 秒ぶんしか進まない(非表示の間を数えない)", Math.abs(s2 - s1 - 1) < 1e-6, `${(s2 - s1).toFixed(3)} 秒`);
+  ag.restoreAging(null, Date.now());
+}
+
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて成功");
 process.exit(failed ? 1 : 0);

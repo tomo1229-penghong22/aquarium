@@ -1,6 +1,6 @@
 // 水槽の情景(配置・水草・光・水面・温度計・ガラス・エアストーン・泡)の生成と描画。
 import { DPR, H, TAU, Tw, U, W, clamp, ctx, current, lerp, mix, mulberry, nightT, noise1, sandY, waterTop } from "./core.js";
-import { agingOn } from "./aging.js";
+import { agingOn, algaeGlass, algaeHard, clog, dirt, growth } from "./aging.js";
 
 /* ---- 情景の状態(buildScene が作り直す) ---- */
 export let staticNight = null, staticLayer = null, plants = { back: [], mid: [], front: [] }, rocks = [];
@@ -128,6 +128,7 @@ export function buildScene(){
   for (let i = 0; i < 60; i++) motes.push({ x: r() * W, y: waterTop + r() * (H * 0.78 - waterTop), s: 0.6 + r() * 1.3, a: 0.12 + r() * 0.25, k: r() * 100 });
   buildStatic();
   buildLight();
+  buildAging();
 }
 
 function makeStatic(N){
@@ -214,13 +215,13 @@ function makeStatic(N){
 function buildStatic(){ staticLayer = makeStatic(false); staticNight = makeStatic(true); }
 
 /* ---------------- 水草の描画 ---------------- */
-function spine(p, t){
+function spine(p, t, h = p.h, nn = p.n){ // h・nn:成長で伸ばした高さ・節の数(省略時は元のまま)
   const pts = [];
   let x = p.x, y = p.y;
-  const seg = p.h / p.n;
+  const seg = h / nn;
   pts.push([x, y, -Math.PI / 2 + p.lean]);
-  for (let i = 1; i <= p.n; i++) {
-    const s = i / p.n;
+  for (let i = 1; i <= nn; i++) {
+    const s = i / nn;
     const cur = current(x, t - s * 1.1 - p.phase * 0.05);
     const a = -Math.PI / 2 + p.lean * (1 - s * 0.35) + cur * p.flex * Math.pow(s, 1.25)
       + Math.sin(t * 1.6 + s * 5 + p.phase) * 0.04 * s;
@@ -231,7 +232,9 @@ function spine(p, t){
   return pts;
 }
 export function drawRibbon(p, t){
-  const pts = spine(p, t), n = pts.length, L = [], R = [];
+  // 成長:葉が最大 1.3 倍に伸びる(水面の少し下で頭打ち。届いた先は spine が水面に沿わせる)。手前の草(flat)は変えない
+  const h = !p.flat && growth >= AG_EPS ? Math.min(p.h * (1 + 0.3 * growth), Math.max(p.h, p.y - waterTop - 6 * U)) : p.h;
+  const pts = spine(p, t, h), n = pts.length, L = [], R = [];
   for (let i = 0; i < n; i++) {
     const s = i / (n - 1), [x, y, a] = pts[i];
     const tw = p.flat ? 1 : 0.3 + 0.7 * Math.abs(Math.cos(s * 2.6 + p.tw + Math.sin(t * 0.5 + p.tw) * 0.6));
@@ -255,15 +258,19 @@ export function drawRibbon(p, t){
   }
 }
 export function drawStem(p, t){
-  const pts = spine(p, t);
+  // 成長:背が最大 1.35 倍に伸び(水面の少し下で頭打ち)、節も増えて葉の間隔は保つ。先端の赤みが増し、下の方まで染まる
+  const g = growth >= AG_EPS ? growth : 0;
+  let h = p.h, nn = p.n, tip = p.c2;
+  if (g) { h = Math.min(p.h * (1 + 0.35 * g), Math.max(p.h, p.y - waterTop - 14 * U)); nn = Math.max(p.n, Math.round(p.n * h / p.h)); tip = mixC(p.c2, "#dd5a45", 0.3 * g); }
+  const pts = spine(p, t, h, nn);
   ctx.strokeStyle = p.stemC; ctx.lineWidth = 2 * U; ctx.lineCap = "round";
   ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
   for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
   ctx.stroke();
   for (let i = 2; i < pts.length; i += 1) {
-    const s = i / p.n, [x, y, a] = pts[i];
+    const s = i / nn, [x, y, a] = pts[i];
     const len = p.leaf * (1.05 - 0.45 * s);
-    ctx.fillStyle = mix(p.c1, p.c2, Math.pow(s, 1.6));
+    ctx.fillStyle = g ? mixC(p.c1, tip, Math.pow(s, 1.6 - 0.6 * g)) : mix(p.c1, p.c2, Math.pow(s, 1.6));
     for (const side of [-1, 1]) {
       const la = a + side * (1.05 - 0.25 * s) + Math.sin(t * 1.3 + i + p.phase) * 0.06;
       ctx.beginPath();
@@ -272,7 +279,7 @@ export function drawStem(p, t){
     }
   }
 }
-function drawLeaf(bx, by, l, t, flex, pet, cBase, cTip){
+function drawLeaf(bx, by, l, t, flex, pet, cBase, cTip, cMid = l.c, dots = null){
   const sp = { x: bx, y: by, h: l.len, n: 10, lean: l.ang, flex, phase: l.phase };
   const pts = spine(sp, t), n = pts.length, Lp = [], Rp = [];
   for (let i = 0; i < n; i++) {
@@ -286,7 +293,7 @@ function drawLeaf(bx, by, l, t, flex, pet, cBase, cTip){
   for (let i = n - 1; i >= 0; i--) ctx.lineTo(Rp[i][0], Rp[i][1]);
   ctx.closePath();
   const g = ctx.createLinearGradient(pts[0][0], pts[0][1], pts[n - 1][0], pts[n - 1][1]);
-  g.addColorStop(0, cBase); g.addColorStop(0.5, l.c); g.addColorStop(1, cTip);
+  g.addColorStop(0, cBase); g.addColorStop(0.5, cMid); g.addColorStop(1, cTip);
   ctx.fillStyle = g; ctx.fill();
   ctx.strokeStyle = "rgba(210,240,180,0.35)"; ctx.lineWidth = 1 * U;
   const i0 = Math.max(1, Math.floor(pet * (n - 1)));
@@ -298,8 +305,28 @@ function drawLeaf(bx, by, l, t, flex, pet, cBase, cTip){
     ctx.beginPath(); ctx.moveTo(pts[i][0], pts[i][1]); ctx.lineTo((pts[i + 1][0] + Lp[i + 1][0] * 2) / 3, (pts[i + 1][1] + Lp[i + 1][1] * 2) / 3);
     ctx.moveTo(pts[i][0], pts[i][1]); ctx.lineTo((pts[i + 1][0] + Rp[i + 1][0] * 2) / 3, (pts[i + 1][1] + Rp[i + 1][1] * 2) / 3); ctx.stroke();
   }
+  if (dots) { // 縁の苔(濃い茶緑の小さな点)。しきい値 th が algaeHard 未満の点だけ、まとめて 1 回で塗る
+    let any = false;
+    for (const d of dots) {
+      if (d.th >= algaeHard) continue;
+      const i = clamp(Math.round(d.s * (n - 1)), i0 + 1, n - 2), E = d.side > 0 ? Lp[i] : Rp[i];
+      const x = lerp(pts[i][0], E[0], 0.85), y = lerp(pts[i][1], E[1], 0.85);
+      if (!any) { ctx.beginPath(); any = true; }
+      ctx.moveTo(x + d.rad, y); ctx.arc(x, y, d.rad, 0, TAU);
+    }
+    if (any) { ctx.fillStyle = "rgba(84,76,32,0.58)"; ctx.fill(); }
+  }
 }
-export function drawSword(p, t){ p.leaves.forEach(l => drawLeaf(p.x, p.y, l, t, 0.14, 0.25, "#2c5c27", "#8cc866")); }
+// アマゾンソード:外側(先頭)の古い葉ほど、clog に比例して黄ばむ(内側 4 割の葉は緑のまま)。algaeHard で葉の縁に苔の点
+export function drawSword(p, t){
+  const n = p.leaves.length, c = clog >= AG_EPS ? clog : 0, a = algaeHard >= AG_EPS;
+  p.leaves.forEach((l, i) => {
+    const w = c * clamp(1 - i / (n * 0.6), 0, 1) * 0.85;
+    if (!w && !a) return drawLeaf(p.x, p.y, l, t, 0.14, 0.25, "#2c5c27", "#8cc866");
+    if (!w) return drawLeaf(p.x, p.y, l, t, 0.14, 0.25, "#2c5c27", "#8cc866", l.c, l.dots);
+    drawLeaf(p.x, p.y, l, t, 0.14, 0.25, mixC("#2c5c27", "#7d7a2a", w), mixC("#8cc866", "#e0d676", w), mixC(l.c, "#b2ae45", w), a ? l.dots : null);
+  });
+}
 export function drawFern(p, t){ p.leaves.forEach(l => drawLeaf(l.bx, l.by, l, t, 0.2, 0.05, "#244f28", "#7fbe5e")); }
 export function drawLotus(p, t){
   p.leaves.forEach(l => {
@@ -367,12 +394,15 @@ export function drawFloats(t){
       for (let i = 1; i <= 6; i++) { const s = i / 6; px += current(px, t - s) * 5 * U * s + Math.sin(t * 1.2 + rt.phase + s * 4) * 1.2 * U; py += rt.h / 6; ctx.lineTo(px, py); }
       ctx.stroke();
     });
-    fl.leaves.forEach(([dx, r, c]) => {
+    const leaf = ([dx, r, c]) => {
       const lx = x + dx, ly = surfaceY(lx, t) + 1.5 * U;
       ctx.fillStyle = "rgba(40,80,40,0.8)"; ctx.beginPath(); ctx.ellipse(lx, ly + 1.2 * U, r, r * 0.28, 0, 0, TAU); ctx.fill();
       ctx.fillStyle = c; ctx.beginPath(); ctx.ellipse(lx, ly, r, r * 0.26, 0, 0, TAU); ctx.fill();
       ctx.fillStyle = "rgba(240,255,210,0.55)"; ctx.beginPath(); ctx.ellipse(lx - r * 0.2, ly - r * 0.08, r * 0.5, r * 0.07, 0, 0, TAU); ctx.fill();
-    });
+    };
+    fl.leaves.forEach(leaf);
+    // 成長:葉が増える(最大で元の約 1.6 倍。追加の葉は別シードで作り置き)
+    if (growth >= AG_EPS && fl.extra) for (let i = 0, k = Math.round(fl.extra.length * growth); i < k; i++) leaf(fl.extra[i]);
   });
 }
 
@@ -399,6 +429,172 @@ export function drawRock(r){
   ctx.beginPath(); ctx.moveTo(r.x - r.w * 0.2, r.base - r.h * 0.75); ctx.quadraticCurveTo(r.x + r.w * 0.1, r.base - r.h * 0.6, r.x + r.w * 0.3, r.base - r.h * 0.7); ctx.stroke();
   ctx.fillStyle = "rgba(20,40,35,0.25)"; ctx.fillRect(r.x - r.w * 1.2, r.base - r.h * 0.18, r.w * 2.4, r.h);
   ctx.restore();
+}
+
+/* ---------------- 時間経過の見た目(ガラスの汚れ・苔、岩と流木の苔) ----------------
+   状態(dirt・algaeGlass・algaeHard)は aging.js が所有。値が AG_EPS 未満の要素は描画命令を出さない(新品では何も描かない)。
+   乱数は別シード(AG_SEED)の mulberry だけを使い、buildScene の乱数列 r は消費しない。
+   テクスチャ(オフスクリーン Canvas)は初めて必要になったときに作り(ensureAging)、resize で捨てる。毎フレームは drawImage+globalAlpha だけ。
+   (起動時・resize のたびに作ると、状態が 0 の新品でも描画ログに作成命令が出てしまうため、必要になるまで作らない。
+   起動時に状態が指定されている場合(?aging)は、buildAging の末尾ですぐ作る) */
+const AG_EPS = 0.002, AG_SEED = 20261002;
+const rgbOf = c => { if (c[0] === "#") { const n = parseInt(c.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; } const m = c.match(/[\d.]+/g); return [+m[0], +m[1], +m[2]]; };
+const mixC = (c1, c2, t) => { const a = rgbOf(c1), b = rgbOf(c2); return `rgb(${Math.round(lerp(a[0], b[0], t))},${Math.round(lerp(a[1], b[1], t))},${Math.round(lerp(a[2], b[2], t))})`; };
+let agData = { hairs: [], blobs: [], box: null }, agTex = null;
+const smooth = x => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
+// 格子の値ノイズ(cw×ch セル。u, v は 0〜1)。ゆるやかな大きい斑を作るために使う
+function valueNoise(r, cw, ch){
+  const gw = cw + 2, g = new Float32Array(gw * (ch + 2));
+  for (let i = 0; i < g.length; i++) g[i] = r();
+  return (u, v) => {
+    const x = u * cw, y = v * ch, i = Math.floor(x), j = Math.floor(y), fx = x - i, fy = y - j;
+    const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+    return lerp(lerp(g[j * gw + i], g[j * gw + i + 1], sx), lerp(g[(j + 1) * gw + i], g[(j + 1) * gw + i + 1], sx), sy);
+  };
+}
+function buildAging(){
+  const r = mulberry(AG_SEED);
+  agTex = null;
+  // 浮草の追加の葉(元の葉数の約 0.6 倍。成長に応じて先頭から使う)
+  floats.forEach(fl => {
+    fl.extra = [];
+    for (let j = 0, n = Math.round(fl.leaves.length * 0.6); j < n; j++) fl.extra.push([(r() - 0.5) * 64 * U, (7 + r() * 6) * U, mix("#5d9e3c", "#9fd062", r())]);
+  });
+  // アマゾンソードの葉の縁の苔の点(しきい値 th が algaeHard 未満のものを描く)
+  plants.mid.forEach(p => {
+    if (p.type !== "sword") return;
+    p.leaves.forEach(l => { l.dots = []; for (let k = 0; k < 16; k++) l.dots.push({ s: 0.3 + r() * 0.65, side: r() < 0.5 ? -1 : 1, rad: (0.7 + r() * 0.9) * U, th: r() }); });
+  });
+  // 岩・流木の上面を覆うやわらかい茶緑のうぶ毛(hairs:小さな丸い毛玉、blobs:その下の薄い膜)。位置だけを作り、描くのは ensureAging
+  const hairs = [], blobs = [];
+  rocks.forEach(rk => {
+    const pts = rk.pts, nHair = Math.round(rk.w / U * 3.6), nBlob = Math.round(rk.w / U * 0.7);
+    for (let n = 0, tries = 0; n < nHair && tries < nHair * 6; tries++) {
+      const q = r() * (pts.length - 1), i = Math.min(pts.length - 2, Math.floor(q)), f = q - i;
+      const x = lerp(pts[i][0], pts[i + 1][0], f), y = lerp(pts[i][1], pts[i + 1][1], f);
+      const ox = x - rk.x, oy = y - rk.base, L = Math.hypot(ox, oy) || 1, ux = ox / L, uy = oy / L;
+      if (uy > -0.2) continue; // 上面だけ
+      n++;
+      const d = r() * r() * 0.42 * rk.h - 0.6 * U; // 輪郭から内側へ(手前ほど濃く)。少しだけ外へはみ出す
+      hairs.push({ x: x - ux * d, y: y - uy * d, rad: (1.1 + r() * 2) * U, tone: r() < 0.5 ? 0 : 1, th: r() });
+      if (n <= nBlob) { const d2 = r() * 0.25 * rk.h; blobs.push({ x: x - ux * d2, y: y - uy * d2, rad: (3 + r() * 4) * U, th: r() }); }
+    }
+  });
+  wood.forEach(br => {
+    for (let i = 0; i < br.length - 1; i++) {
+      const [x0, y0, w0] = br[i], [x1, y1, w1] = br[i + 1], dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy) || 1;
+      let nx = -dy / L, ny = dx / L; if (ny > 0) { nx = -nx; ny = -ny; } // 上向きの法線
+      const cnt = Math.max(1, Math.round(L / (1.5 * U)));
+      for (let j = 0; j < cnt; j++) {
+        const f = r(), w = lerp(w0, w1, f) / 2, cx = x0 + dx * f, cy = y0 + dy * f;
+        if (-ny < 0.3 && r() < 0.5) continue; // ほぼ縦の枝は半分に間引く
+        const o = w * (0.95 - r() * r() * 1.1); // 上の縁のあたりに多く、中心へ向かって薄く
+        hairs.push({ x: cx + nx * o, y: cy + ny * o, rad: (1 + r() * 1.8) * U, tone: r() < 0.5 ? 0 : 1, th: r() });
+        if (r() < 0.25) blobs.push({ x: cx + nx * w * 0.7, y: cy + ny * w * 0.7, rad: (2.2 + r() * 2.5) * U, th: r() });
+      }
+    }
+  });
+  let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+  const grow = (x, y) => { bx0 = Math.min(bx0, x); by0 = Math.min(by0, y); bx1 = Math.max(bx1, x); by1 = Math.max(by1, y); };
+  hairs.forEach(h => { grow(h.x - h.rad, h.y - h.rad); grow(h.x + h.rad, h.y + h.rad); }); blobs.forEach(b => { grow(b.x - b.rad, b.y - b.rad); grow(b.x + b.rad, b.y + b.rad); });
+  const m = 6 * U;
+  agData = { hairs, blobs, box: null };
+  if (hairs.length) {
+    const x = Math.max(0, bx0 - m), y = Math.max(waterTop, by0 - m);
+    agData.box = { x, y, w: Math.min(W, bx1 + m) - x, h: Math.min(H, by1 + m) - y };
+  }
+  if (dirt >= AG_EPS || algaeGlass >= AG_EPS || algaeHard >= AG_EPS) ensureAging();
+}
+// テクスチャの作り置き(状態が必要になったときに 1 回。resize まで使い回す)
+function ensureAging(){
+  if (agTex) return agTex;
+  const S = Math.min(DPR, 1.5), r = mulberry(AG_SEED + 1), t = { hard: [] };
+  // 1) ガラスの汚れ:ゆるやかな大きい斑(黄緑〜茶のむらのある膜)。小さな画像を引き伸ばす(なめらかなので十分)
+  {
+    const DW = 192, DH = 120, [c, g] = mkCanvas(DW, DH), img = g.createImageData(DW, DH), d = img.data;
+    const n1 = valueNoise(r, 3, 2), n2 = valueNoise(r, 6, 4), n3 = valueNoise(r, 11, 7), nc = valueNoise(r, 4, 3);
+    let k = 0;
+    for (let j = 0; j < DH; j++) {
+      const v = (j + 0.5) / DH;
+      for (let i = 0; i < DW; i++) {
+        const u = (i + 0.5) / DW, n = 0.6 * n1(u, v) + 0.3 * n2(u, v) + 0.1 * n3(u, v), dens = smooth((n - 0.3) / 0.45), cm = nc(u, v);
+        d[k] = lerp(176, 150, cm); d[k + 1] = lerp(184, 126, cm); d[k + 2] = lerp(92, 72, cm);
+        d[k + 3] = (0.08 + 0.3 * dens) * (0.8 + 0.4 * v) * 255; k += 4;
+      }
+    }
+    g.putImageData(img, 0, 0); t.dirt = c;
+  }
+  // 2) ガラスの苔:点状〜小さな斑の群生。下寄りと左右の隅に多く、上ほど少ない。早く出る点(A)と後から増える点(B)の 2 枚
+  {
+    const [ca, ga] = mkCanvas(Math.max(1, Math.round(W * S)), Math.max(1, Math.round(H * S))), [cb, gb] = mkCanvas(ca.width, ca.height);
+    ga.scale(S, S); gb.scale(S, S);
+    const hgt = H - waterTop, dens = (x, y) => {
+      const yf = (y - waterTop) / hgt, xf = x / W, edge = Math.max(0, 1 - Math.min(xf, 1 - xf) / 0.12);
+      return Math.min(1, 0.04 + 0.75 * yf * yf * yf + 0.45 * edge * (0.35 + 0.65 * yf));
+    };
+    for (let n = 0, tries = 0; n < 130 && tries < 6000; tries++) {
+      const cx = r() * W, cy = waterTop + r() * hgt;
+      if (r() > dens(cx, cy)) continue;
+      n++;
+      const R = (5 + r() * 12) * U, spots = 7 + Math.floor(r() * 10);
+      for (let j = 0; j < spots; j++) {
+        const a = r() * TAU, dd = R * Math.sqrt(r()), g = r() < 0.4 ? ga : gb;
+        const big = r() < 0.15, rad = (big ? 2.6 + r() * 2.2 : 0.5 + r() * r() * 2.2) * U;
+        g.fillStyle = mixC("#4f8f3a", "#8dbb4c", r()).replace("rgb(", "rgba(").replace(")", `,${big ? 0.34 : 0.5 + r() * 0.3})`);
+        g.beginPath(); g.arc(cx + Math.cos(a) * dd, cy + Math.sin(a) * dd * 0.8, rad, 0, TAU); g.fill();
+      }
+    }
+    t.algaeA = ca; t.algaeB = cb;
+  }
+  // 3) 岩・流木の苔:しきい値の帯(0〜1/3、1/3〜2/3、2/3〜1)ごとに 1 枚。外接の四角だけ作る
+  if (agData.box) {
+    const B = agData.box, bw = Math.max(1, Math.round(B.w * S)), bh = Math.max(1, Math.round(B.h * S));
+    const TONE = ["rgba(112,116,54,0.34)", "rgba(140,128,66,0.3)"];
+    for (let b = 0; b < 3; b++) {
+      const [c, g] = mkCanvas(bw, bh);
+      g.scale(S, S); g.translate(-B.x, -B.y);
+      const blurOK = typeof g.filter === "string";
+      if (blurOK) g.filter = `blur(${0.7 * U}px)`; // やわらかく(毛玉の輪郭をぼかす)
+      const inBand = th => th >= b / 3 && (b === 2 || th < (b + 1) / 3);
+      g.fillStyle = "rgba(112,112,52,0.22)";
+      agData.blobs.forEach(o => { if (!inBand(o.th)) return; g.beginPath(); g.arc(o.x, o.y, o.rad, 0, TAU); g.fill(); });
+      agData.hairs.forEach(h => {
+        if (!inBand(h.th)) return;
+        g.fillStyle = TONE[h.tone];
+        g.beginPath(); g.arc(h.x, h.y, h.rad, 0, TAU); g.fill();
+      });
+      t.hard.push(c);
+    }
+  }
+  agTex = t;
+  return t;
+}
+// ガラスの汚れ・苔(水面の後、色調補正の前に呼ぶ:照明の色調がかかる)。水中部分(waterTop〜H)だけ
+export function drawAgingGlass(){
+  const dOn = dirt >= AG_EPS, aOn = algaeGlass >= AG_EPS;
+  if (!dOn && !aOn) return;
+  const t = ensureAging(), a0 = ctx.globalAlpha, h = H - waterTop;
+  if (dOn) {
+    ctx.globalAlpha = a0 * dirt; ctx.drawImage(t.dirt, 0, waterTop, W, h);
+    ctx.globalAlpha = a0 * dirt * 0.09; ctx.fillStyle = "rgb(236,240,226)"; ctx.fillRect(0, waterTop, W, h); // わずかな白濁
+  }
+  if (aOn) {
+    ctx.globalAlpha = a0 * 0.85 * clamp(algaeGlass * 2.2, 0, 1); ctx.drawImage(t.algaeA, 0, 0, W, H);
+    const b = clamp((algaeGlass - 0.25) / 0.75, 0, 1);
+    if (b >= AG_EPS) { ctx.globalAlpha = a0 * 0.85 * b; ctx.drawImage(t.algaeB, 0, 0, W, H); }
+  }
+  ctx.globalAlpha = a0;
+}
+// 岩・流木の苔(drawMoss の後)。うぶ毛状のくすんだ茶緑(装飾のモスの緑とは別)
+export function drawAgingHard(){
+  if (algaeHard < AG_EPS || !agData.box) return;
+  const t = ensureAging(), B = agData.box, a0 = ctx.globalAlpha;
+  for (let b = 0; b < 3; b++) {
+    const al = clamp(algaeHard * 3 - b, 0, 1);
+    if (al < AG_EPS || !t.hard[b]) continue;
+    ctx.globalAlpha = a0 * al; ctx.drawImage(t.hard[b], B.x, B.y, B.w, B.h);
+  }
+  ctx.globalAlpha = a0;
 }
 
 /* ---------------- 光・水面 ---------------- */

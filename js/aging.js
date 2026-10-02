@@ -81,6 +81,7 @@ export let DO = 8.2;                  // initAging() で DOsat(25) に設定
 export let lastClean = 0, lastFilter = 0; // epoch ms(initAging() で起動時刻に設定)
 export let sinceClean = 0;            // 清掃からの ON 秒数(algaeGlass はここから逆算)
 let saveAcc = 0, pending = null;      // pending:メンテを実施したときの案内用({cleaned, filtered})
+let frozenSave = false, loadedRaw;    // ?aging 付きで開いている間は、保存データの aging を読み込んだ元の値のまま書き戻す
 
 const glassOf = s => clamp((s - RATE.glassLagSec) / RATE.glassRiseSec, 0, 1);
 const num = (v, d, a, b) => typeof v === "number" && Number.isFinite(v) ? clamp(v, a, b) : d;
@@ -110,7 +111,8 @@ export function initAging(now){
   let raw = null;
   try { raw = getSavedRaw()?.aging; } catch (e) {}
   restoreAging(raw, now);
-  setExtraSave(() => ({ aging: serializeAging() }));
+  loadedRaw = raw; frozenSave = false;
+  setExtraSave(() => ({ aging: frozenSave ? loadedRaw : serializeAging() }));
 }
 /* 状態を直接指定(確認用パラメータ・テスト用)。algaeGlass を指定したら sinceClean を逆算 */
 export function setAgingState(p){
@@ -122,6 +124,34 @@ export function setAgingState(p){
   if ("lastClean" in p) lastClean = p.lastClean;
   if ("lastFilter" in p) lastFilter = p.lastFilter;
   if ("algaeGlass" in p) { algaeGlass = clamp(p.algaeGlass, 0, 1); sinceClean = RATE.glassLagSec + algaeGlass * RATE.glassRiseSec; if (algaeGlass === 0) sinceClean = 0; }
+}
+/* ---------------- 確認用パラメータ ?aging=dirt:1,algaeGlass:1,algaeHard:1,clog:1,growth:1,DO:2 ----------------
+   項目は任意の部分集合。dirt・algaeGlass・algaeHard・clog・growth は 0〜1、DO は mg/L(0〜20)。範囲外の数値は範囲内へ丸め、
+   不正な項目(未知の名前・数値でない・形式違い)は項目ごとに無視する。aging の指定がなければ null を返す(?perf と同様、無指定時は何もしない) */
+const PARAM_KEYS = { dirt: [0, 1], algaeGlass: [0, 1], algaeHard: [0, 1], clog: [0, 1], growth: [0, 1], DO: [0, 20] };
+export function parseAgingParam(search){
+  const m = /[?&]aging(?:=([^&#]*))?(?=[&#]|$)/.exec(typeof search === "string" ? search : "");
+  if (!m) return null;
+  const values = {};
+  let body = m[1] || "";
+  try { body = decodeURIComponent(body); } catch (e) { return { values }; }
+  for (const item of body.split(",")) {
+    const kv = item.split(":");
+    if (kv.length !== 2) continue;
+    const key = kv[0].trim(), val = kv[1].trim();
+    if (!Object.prototype.hasOwnProperty.call(PARAM_KEYS, key) || !/^[+-]?(\d+\.?\d*|\.\d+)$/.test(val)) continue;
+    values[key] = clamp(Number(val), PARAM_KEYS[key][0], PARAM_KEYS[key][1]);
+  }
+  return { values };
+}
+/* 起動時(initAging の後)に呼ぶ。?aging があれば状態を指定し、以後 aging の保存は読み込んだ元の値のまま。
+   メンテ(checkMaintenance)は ?aging 付きの間は何もしない(指定した状態が消えないように)。指定がなければ null */
+export function applyAgingParam(search, now = Date.now()){
+  const p = parseAgingParam(search);
+  if (!p) return null;
+  frozenSave = true;
+  setAgingState(p.values);
+  return p;
 }
 export function setAgingOn(v){ agingOn = !!v; save(); }
 /* 全状態を初期値に(A2 のリセットボタンから) */
@@ -148,7 +178,7 @@ export function updateAging(dt, env){
 /* ---------------- メンテ(実日付) ---------------- */
 /* now:epoch ms。実施した内容 { cleaned, filtered } を返し、案内用に pending へも記録する。OFF 中は何もしない(null を返す) */
 export function checkMaintenance(now, T = Tw){
-  if (!agingOn) return null;
+  if (!agingOn || frozenSave) return null; // ?aging 付きの間は、指定した状態がメンテで消えないよう何もしない
   const done = { cleaned: false, filtered: false };
   if (now - lastClean >= CLEAN_INTERVAL_MS) {
     dirt = 0; algaeGlass = 0; sinceClean = 0; algaeHard *= 0.6; DO = DOsat(T); lastClean = now; done.cleaned = true;
