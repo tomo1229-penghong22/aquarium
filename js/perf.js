@@ -192,7 +192,7 @@ function benchLine(){
   return `\nbench 条件 ${B.i + 1}/${B.conds.length} ${c.night ? "夜" : "昼"} ${c.dir ? (c.dir === "fwd" ? "往 " : "復 ") : ""}${c.name} (${B.phase === "warm" ? "捨て" : "計測"})`;
 }
 
-export function perfReport(cv, dpr, fishCount){                          // 0.5 秒ごとに集計とオーバーレイ更新
+export function perfReport(cv, dpr, fishCount, lite){                          // 0.5 秒ごとに集計とオーバーレイ更新
   const now = performance.now();
   if (now - lastShow < 500) return;
   lastShow = now;
@@ -211,6 +211,6 @@ export function perfReport(cv, dpr, fishCount){                          // 0.5 
   const rows = Object.keys(s).map(k => `${k.padEnd(11)}${f(s[k].avg)}${f(s[k].med)}${f(s[k].p95)}`);
   const gv = govState();
   const fr = s.frame ? `frame 中央値 ${s.frame.med.toFixed(1)}ms  p95 ${s.frame.p95.toFixed(1)}ms` : "";
-  el.textContent = `FPS ${fps.toFixed(1)}  fish ${fishCount}\n${fr}\ncanvas ${info.canvas}  dpr ${dpr}\ntrail ${gv.mode}  3s avg ${gv.avg.toFixed(2)}ms (しきい値 ${GOV.thresholdMs})\n` +
+  el.textContent = `FPS ${fps.toFixed(1)}  fish ${fishCount}\n${fr}\ncanvas ${info.canvas}  dpr ${dpr}  lite ${lite ? "on" : "off"}\ntrail ${gv.mode}  3s avg ${gv.avg.toFixed(2)}ms (しきい値 ${GOV.thresholdMs})\n` +
     (SKIP.size ? `skip ${[...SKIP].join(",")}\n` : "") + `${"ms".padEnd(11)}${"avg".padStart(9)}${"med".padStart(9)}${"p95".padStart(9)}\n` + rows.join("\n") + benchLine();
 }

@@ -183,6 +183,13 @@ for (const sp of A.ORDER) {
     A.counts.shrimp = 8; core.save();
     check("save() の保存データに新しい種の数が入る", JSON.parse(lsLast).counts.shrimp === 8);
     A.counts.shrimp = A.SPECIES.shrimp.def; A.syncFish();
+    // 軽量モード:保存と復元(キーのない古い保存はオフ)
+    const l0 = await reload({ counts: { neon: 7 }, T: 26 }, "lite0");
+    const l1 = await reload({ counts: { neon: 7 }, T: 26, lite: true }, "lite1");
+    const l2 = await reload({ lite: "yes" }, "lite2");
+    check("軽量モード:lite キーのない古い保存はオフ、lite:true はオン、真偽でない値はオフ", l0.liteOn === false && l1.liteOn === true && l2.liteOn === false, `${l0.liteOn}/${l1.liteOn}/${l2.liteOn}`);
+    core.setLite(true); core.save(); const sOn = JSON.parse(lsLast).lite; core.setLite(false); core.save(); const sOff = JSON.parse(lsLast).lite;
+    check("軽量モード:save() が lite(真偽)を保存する", sOn === true && sOff === false, `${sOn}/${sOff}`);
   } catch (e) { check("保存の復元テストが例外なく動く", false, String(e)); }
 }
 
@@ -704,6 +711,23 @@ for (const [sp, acts] of Object.entries(ACTS_NEW)) {
   ag.setAgingState({ algaeGlass: 1, algaeHard: 1 }); place(); frames(60 * 2);
   const b2 = TS(); A.setPseudo(true); frames(2); place(); frames(60 * 2); const r1 = TS(); A.setPseudo(false); frames(2);
   check("なめた跡:resize でマスクが捨てられて作り直され(世代番号が変わる)、大きさが水槽に追従する", b2.glass && r1.id > b2.id && r1.mw === Math.ceil(core.W / scene.TRAIL.ms) && r1.mh === Math.ceil(core.H / scene.TRAIL.ms), `番号 ${b2.id}→${r1.id} / ${b2.mw}x${b2.mh} → ${r1.mw}x${r1.mh}(水槽 ${core.W}x${core.H})`);
+  frames(60);
+
+  // 軽量モード:ボタンの切り替えを繰り返して例外なし・aria が追従・保存される/オンのとき跡が出ず(強さ 0)、苔の数値は不変
+  const mainM = await imp("main.js");
+  const clickLite = () => (ids.litebtn.L.click || []).forEach(f => f({}));
+  gov.govReset(); ag.setAgingOn(true); ag.setAgingState({ algaeGlass: 1, algaeHard: 1 }); place(); frames(60 * 3);
+  const stOff = TS(), lvOff = mainM.trailLevel();
+  let errL = null;
+  try { for (let i = 0; i < 6; i++) { clickLite(); frames(3); } } catch (e) { errL = e; }   // 偶数回 → オフに戻る
+  check("軽量モード:ボタンを 6 回押して例外なし・オフに戻り、aria-pressed / aria-label が追従する", !errL && core.liteOn === false && ids.litebtn.attrs["aria-pressed"] === "false" && ids.litebtn.attrs["aria-label"] === "軽量モード:オフ。押すとオンにします" && ids.litebtn.textContent === "軽量モード:オフ", errL ? String(errL) : "");
+  clickLite();
+  check("軽量モード:オンにすると aria が「オン」になり、保存データの lite が true", core.liteOn === true && ids.litebtn.attrs["aria-pressed"] === "true" && ids.litebtn.attrs["aria-label"] === "軽量モード:オン。押すとオフにします" && ids.litebtn.textContent === "軽量モード:オン" && JSON.parse(lsLast).lite === true);
+  frames(2); place(); frames(60 * 3); const stOn = TS(), lvOn = mainM.trailLevel();
+  check("軽量モード:オフでは跡が出て(強さ > 0)、オンでは跡が出ず(強さ 0・マスクと作り置きなし)", stOff.stamps > 0 && lvOff > 0 && lvOn === 0 && !stOn.glass && !stOn.hard && !stOn.cached && stOn.mw === 0, `オフ 強さ ${lvOff} 書き足し ${stOff.stamps} / オン 強さ ${lvOn} ${JSON.stringify(stOn)}`);
+  check("軽量モード:オンの間も苔の量(algaeGlass・algaeHard)は変わらない", ag.algaeGlass === 1 && ag.algaeHard === 1, `glass ${ag.algaeGlass} / hard ${ag.algaeHard}`);
+  clickLite(); frames(2); place(); frames(60 * 3);
+  check("軽量モード:オフに戻すと跡がまた出る", core.liteOn === false && TS().stamps > 0 && mainM.trailLevel() > 0);
   frames(60);
 
   // 性能による切り替え:測定値を GOV.override で与える

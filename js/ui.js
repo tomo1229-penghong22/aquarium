@@ -1,6 +1,6 @@
 // パネル(魚の選択・水温・照明)と全画面表示。
 // main.js の resize を呼ぶため、main.js とは循環 import になる(関数の中でだけ使うので問題ない)。
-import { H, Tset, Tw, U, W, clamp, counts, ctx, cv, nightOn, save, setCtx, setNightOn, setTimeScale, setTset, setU, tankEl } from "./core.js";
+import { H, Tset, Tw, U, W, clamp, counts, ctx, cv, liteOn, nightOn, save, setCtx, setLite, setNightOn, setTimeScale, setTset, setU, tankEl } from "./core.js";
 import { ORDER, SPECIES } from "./species.js";
 import { PAINT, setBaseA } from "./fish-render.js";
 import { fishes, syncFish } from "./fish-behavior.js";
@@ -63,6 +63,16 @@ export function setNight(v){
 }
 document.querySelectorAll("#light button").forEach(b => b.addEventListener("click", () => setNight(b.dataset.v === "night")));
 setNight(nightOn);
+
+/* 軽量モード(手動の切り替え。押すと保存) */
+const liteBtn = document.getElementById("litebtn");
+function syncLite(){
+  liteBtn.setAttribute("aria-pressed", String(liteOn));
+  liteBtn.textContent = liteOn ? "軽量モード:オン" : "軽量モード:オフ";
+  liteBtn.setAttribute("aria-label", liteOn ? "軽量モード:オン。押すとオフにします" : "軽量モード:オフ。押すとオンにします");
+}
+liteBtn.addEventListener("click", () => { setLite(!liteOn); save(); syncLite(); });
+syncLite();
 
 /* ---------------- 全画面表示 ---------------- */
 const fsBtn = document.getElementById("fsbtn"), fsHint = document.getElementById("fshint");

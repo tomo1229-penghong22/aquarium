@@ -1,6 +1,6 @@
 // 描画順(draw)・毎フレームの更新(loop)・リサイズ・開始処理。
 // このファイルがエントリポイント。全モジュールの評価が終わってから、末尾の「開始」が実行される。
-import { DPR, counts, H, freezeSave, save, Tset, Tw, W, clamp, ctx, cv, nightOn, nightT, setDPR, setH, setNightT, setTw, setU, setW, setWaterTop, tankEl, timeScale, waterTop } from "./core.js";
+import { DPR, counts, H, freezeSave, liteOn, save, Tset, Tw, W, clamp, ctx, cv, nightOn, nightT, setDPR, setH, setNightT, setTw, setU, setW, setWaterTop, tankEl, timeScale, waterTop } from "./core.js";
 import { ORDER, SPECIES } from "./species.js";
 import { applyAgingParam, checkMaintenance, fishLoadOf, initAging, onVisibility, updateAging } from "./aging.js";
 import { drawFish } from "./fish-render.js";
@@ -89,6 +89,9 @@ function draw(){
   if (PERF) { perfMark("glass"); perfEnd("draw"); }
 }
 
+/* なめた跡の強さ(0〜1)。軽量モードオン・?perf&skip=trails・性能による off のときは 0(苔の状態には触れない) */
+export function trailLevel(){ return (liteOn || skipOn("trails")) ? 0 : trailStrength(); }
+
 function loop(now){
   if (PERF) perfFrame(now);
   const tStart = performance.now(); // logic+draw の所要時間を測る(性能による切り替え。?perf の有無にかかわらず)
@@ -103,11 +106,11 @@ function loop(now){
   updateBubbles(dt, T); updatePuffs(dt, T);
   let load = 0; for (const f of fishes) load += fishLoadOf(f.sp, f.scale);
   updateAging(realDt, { load, T: Tw, counts });
-  updateTrails(dt, grazers(), skipOn("trails") ? 0 : trailStrength()); // なめた跡(見た目の層)
+  updateTrails(dt, grazers(), trailLevel()); // なめた跡(見た目の層)
   if (PERF) perfEnd("logic");
   draw();
   govTick(performance.now() - tStart, realDt);
-  if (PERF) perfReport(cv, DPR, fishes.length);
+  if (PERF) perfReport(cv, DPR, fishes.length, liteOn);
   if (frameNo % 15 === 0) updatePanel();
   lightAcc += dt; if (lightAcc >= 1) { lightAcc = 0; if (!benchOn()) autoLightTick(Date.now()); } // 照明の自動判定は約1秒ごと
   requestAnimationFrame(loop);

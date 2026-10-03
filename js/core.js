@@ -15,13 +15,15 @@ export function mix(c1, c2, t){ const a = hexRgb(c1), b = hexRgb(c2); return `rg
 /* ---------------- 状態 ---------------- */
 export const counts = {}; ORDER.forEach(k => counts[k] = SPECIES[k].def);
 export let Tset = 25, Tw = 25, timeScale = 1, nightOn = false, nightT = 0;
+export let liteOn = false; // 軽量モード(手動の切り替え。保存する。描画側は読んで分岐するだけ)
 let savedRaw = null; // 読み込んだ保存データの生オブジェクト(aging.js が自分の項目を読む口)
 try {
   const saved = JSON.parse(localStorage.getItem("aquarium-v1") || "null");
   savedRaw = saved && typeof saved === "object" ? saved : null;
   if (saved) { ORDER.forEach(k => { if (typeof saved.counts?.[k] === "number") counts[k] = clamp(saved.counts[k], 0, SPECIES[k].max); });
     if (typeof saved.T === "number") { Tset = Tw = clamp(saved.T, 18, 34); }
-    if (saved.night) { nightOn = true; nightT = 1; } }
+    if (saved.night) { nightOn = true; nightT = 1; }
+    if (saved.lite === true) liteOn = true; } // キーのない古い保存はオフ
 } catch (e) {}
 export function getSavedRaw(){ return savedRaw; }
 /* 追加の保存項目:fn() が返すオブジェクトを、保存データへ混ぜる(循環 import を避けるための登録口) */
@@ -34,7 +36,7 @@ export function save(){
   if (saveFrozen) return;
   try {
     let extra = null; try { extra = extraSave ? extraSave() : null; } catch (e) {}
-    localStorage.setItem("aquarium-v1", JSON.stringify({ counts, T: Tset, night: nightOn, ...extra }));
+    localStorage.setItem("aquarium-v1", JSON.stringify({ counts, T: Tset, night: nightOn, lite: liteOn, ...extra }));
   } catch (e) {}
 }
 
@@ -67,3 +69,4 @@ export function setTw(v){ Tw = v; }
 export function setTimeScale(v){ timeScale = v; }
 export function setNightOn(v){ nightOn = v; }
 export function setNightT(v){ nightT = v; }
+export function setLite(v){ liteOn = !!v; }
