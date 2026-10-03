@@ -142,6 +142,62 @@ export function buildScene(){
   liteRelease(); // 軽量モードの作り置きは resize で捨てる(必要になったとき作り直す)
   buildAging();
   buildMeter();
+  buildObstacles();
+}
+
+/* ---- 魚の層の入れ替えの判定用:流木・岩・中景の草の「塗られる輪郭」(buildScene のたびに作り置き。毎フレームは作らない) ----
+   drawWood / drawRock / drawSword / drawFern / drawLotus を、塗る多角形を記録するだけの ctx で実際に呼んで集める(描画の式と食い違わない)。
+   中景の草は水流で揺れるので、揺れの位相 4 つ(OBST_T)の輪郭をすべて入れる(和)。fish-behavior.js の layerBlocked が読む。 */
+export const obstacles = []; // { pts: [[x, y], ...], bb: [x0, y0, x1, y1] }
+const OBST_T = [0, 7.3, 15.1, 23.9];
+export function buildObstacles(){
+  obstacles.length = 0;
+  const origCtx = ctx, origP2D = globalThis.Path2D;
+  let m = [1, 0, 0, 1, 0, 0]; const stack = [];
+  const tp = (x, y) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+  class Rec { // パスの記録。tf があれば追加時に変換(ctx のパス)、なければ素の座標のまま持つ(Path2D。fill の時に変換)
+    constructor(tf){ this.tf = tf; this.subs = []; this.last = null; }
+    add(x, y){ if (!this.subs.length) this.subs.push([]); this.subs.at(-1).push(this.tf ? this.tf(x, y) : [x, y]); this.last = [x, y]; }
+    moveTo(x, y){ this.subs.push([]); this.add(x, y); }
+    lineTo(x, y){ this.add(x, y); }
+    bezierCurveTo(a, b, c, d, e, f){ const [x0, y0] = this.last || [a, b]; for (let i = 1; i <= 8; i++) { const t = i / 8, u = 1 - t; this.add(u * u * u * x0 + 3 * u * u * t * a + 3 * u * t * t * c + t * t * t * e, u * u * u * y0 + 3 * u * u * t * b + 3 * u * t * t * d + t * t * t * f); } }
+    quadraticCurveTo(a, b, c, d){ const [x0, y0] = this.last || [a, b]; for (let i = 1; i <= 8; i++) { const t = i / 8, u = 1 - t; this.add(u * u * x0 + 2 * u * t * a + t * t * c, u * u * y0 + 2 * u * t * b + t * t * d); } }
+    arc(x, y, r, a0, a1){ this.subs.push([]); for (let i = 0; i <= 12; i++) { const a = a0 + (a1 - a0) * i / 12; this.add(x + Math.cos(a) * r, y + Math.sin(a) * r); } }
+    ellipse(x, y, rx, ry, rot, a0, a1){ this.subs.push([]); for (let i = 0; i <= 12; i++) { const a = a0 + (a1 - a0) * i / 12, ex = Math.cos(a) * rx, ey = Math.sin(a) * ry; this.add(x + ex * Math.cos(rot) - ey * Math.sin(rot), y + ex * Math.sin(rot) + ey * Math.cos(rot)); } }
+    rect(x, y, w, h){ this.subs.push([]); this.add(x, y); this.add(x + w, y); this.add(x + w, y + h); this.add(x, y + h); }
+    closePath(){}
+  }
+  let cur = new Rec(tp);
+  const emit = p => { for (const sub of p.subs) {
+    if (sub.length < 3) continue;
+    const pts = p.tf ? sub : sub.map(([x, y]) => tp(x, y));
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y] of pts) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; }
+    if (Number.isFinite(x0 + y0 + x1 + y1)) obstacles.push({ pts, bb: [x0, y0, x1, y1] });
+  } };
+  const noop = () => {}, grad = { addColorStop: noop };
+  const API = {
+    save(){ stack.push(m); }, restore(){ m = stack.pop() || m; },
+    translate(x, y){ m = [m[0], m[1], m[2], m[3], m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]; },
+    rotate(a){ const c = Math.cos(a), s = Math.sin(a); m = [m[0] * c + m[2] * s, m[1] * c + m[3] * s, -m[0] * s + m[2] * c, -m[1] * s + m[3] * c, m[4], m[5]]; },
+    scale(x, y){ m = [m[0] * x, m[1] * x, m[2] * y, m[3] * y, m[4], m[5]]; },
+    setTransform(a, b, c, d, e, f){ m = [a, b, c, d, e, f]; },
+    transform(a, b, c, d, e, f){ m = [m[0] * a + m[2] * b, m[1] * a + m[3] * b, m[0] * c + m[2] * d, m[1] * c + m[3] * d, m[0] * e + m[2] * f + m[4], m[1] * e + m[3] * f + m[5]]; },
+    beginPath(){ cur = new Rec(tp); },
+    moveTo(x, y){ cur.moveTo(x, y); }, lineTo(x, y){ cur.lineTo(x, y); },
+    bezierCurveTo(...a){ cur.bezierCurveTo(...a); }, quadraticCurveTo(...a){ cur.quadraticCurveTo(...a); },
+    arc(...a){ cur.arc(...a); }, ellipse(...a){ cur.ellipse(...a); }, rect(...a){ cur.rect(...a); }, closePath(){},
+    fill(p){ emit(p instanceof Rec ? p : cur); },
+    createLinearGradient: () => grad, createRadialGradient: () => grad, createConicGradient: () => grad,
+  };
+  const rec = new Proxy({}, { get(o, k){ return k in API ? API[k] : k in o ? o[k] : noop; }, set(o, k, v){ o[k] = v; return true; } });
+  class RecPath extends Rec { constructor(){ super(null); } }
+  setCtx(rec); globalThis.Path2D = RecPath;
+  try {
+    drawWood();
+    rocks.forEach(r => { m = [1, 0, 0, 1, 0, 0]; stack.length = 0; drawRock(r); });
+    for (const t of OBST_T) plants.mid.forEach(p => { m = [1, 0, 0, 1, 0, 0]; stack.length = 0; (p.type === "fern" ? drawFern : p.type === "lotus" ? drawLotus : drawSword)(p, t); });
+  } finally { setCtx(origCtx); if (origP2D === undefined) delete globalThis.Path2D; else globalThis.Path2D = origP2D; }
 }
 
 function makeStatic(N){

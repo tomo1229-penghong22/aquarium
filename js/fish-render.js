@@ -414,10 +414,21 @@ export function drawSnailFront(f, L, x, y, rot, a = 1){
   ctx.restore();
 }
 
+/* 向きを変える(U ターン)途中の見た目。f.turnS(0〜1。回りの最大でも 1)・f.turnDir(+1 下へ逃げる / −1 上へ)は fish-behavior.js が毎フレーム設定する(なければふだんの姿)。
+   FLIP_MIN:正面向きに近い瞬間の最小の横幅(体長に対する比)。体は横から見て体高が体長の約 0.25〜0.35 倍、正面から見た体の厚み(左右の幅)は体長の約 0.15〜0.25 倍
+   (側扁した魚。ネオン・ラミー・エンゼルは薄く、グッピー・プラティ・コリドラスはやや厚い)。0.2 なら正面向きでも細長い楕円(魚の正面)に見え、細い線にならない。 */
+export const FLIP_MIN = 0.2;
+const TURN_AMP = 0.4, TURN_BEND = 0.3; // 回る間の尾の振りの増え方(最大で 1 + TURN_AMP 倍)と、片側へ曲げる角度(rad)
+export function fishWag(f, S){
+  const ts = f.turnS || 0;
+  if (ts <= 0) return Math.sin(f.phase) * S.wag * (0.45 + 0.55 * Math.min(1, (f.speedNow || 0) / (S.speed * U)));
+  // 回る間は速さが落ちても尾をしっかり振り、逃げる側(turnDir)へ尾を曲げる(ローカル座標で wag が正だと尾が上へ上がる)
+  return Math.sin(f.phase) * S.wag * (1 + TURN_AMP * ts) - (f.turnDir || 0) * TURN_BEND * ts;
+}
 export function drawFish(f){
   const S = SPECIES[f.sp];
   const L = S.len * U * f.scale * (0.72 + 0.38 * f.z);
-  const wag = Math.sin(f.phase) * S.wag * (0.45 + 0.55 * Math.min(1, (f.speedNow || 0) / (S.speed * U)));
+  const wag = fishWag(f, S);
   const dir = f.flip >= 0 ? 1 : -1;
   const fy = bottomY(f.x, f.z), gap = fy - f.y;
   if (gap < 110 * U) {
@@ -427,7 +438,7 @@ export function drawFish(f){
   ctx.save();
   ctx.translate(f.x, f.y);
   ctx.rotate((f.pitch + f.tilt) * dir);
-  ctx.scale(dir * Math.max(0.1, Math.abs(f.flip)), 1);
+  ctx.scale(dir * Math.max(FLIP_MIN, Math.abs(f.flip)), 1);
   BASE_A = S.finAlpha; BODY_A = 1; ctx.globalAlpha = BODY_A;
   PAINT[f.sp](L, wag, f);
   ctx.restore(); BASE_A = 1;
@@ -493,10 +504,10 @@ export function drawFishLite(f){
     ctx.beginPath(); ctx.ellipse(f.x, fy - 3 * U, L * 0.5, L * 0.09, 0, 0, TAU); ctx.fill();
   }
   liteSprite(f, L * FISH_R[f.sp], f.x, f.y, () => {
-    const wag = Math.sin(f.phase) * S.wag * (0.45 + 0.55 * Math.min(1, (f.speedNow || 0) / (S.speed * U)));
+    const wag = fishWag(f, S);
     const dir = f.flip >= 0 ? 1 : -1;
     ctx.rotate((f.pitch + f.tilt) * dir);
-    ctx.scale(dir * Math.max(0.1, Math.abs(f.flip)), 1);
+    ctx.scale(dir * Math.max(FLIP_MIN, Math.abs(f.flip)), 1);
     BASE_A = S.finAlpha; BODY_A = 1; ctx.globalAlpha = BODY_A;
     PAINT[f.sp](L, wag, f);
   });

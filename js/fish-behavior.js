@@ -1,7 +1,8 @@
 // 魚の生成・体調・行動(群れ・分離・壁・水温による層の移動)。
 import { TAU, Tw, U, W, bottomY, clamp, counts, lerp, timeScale, waterTop } from "./core.js";
 import { ORDER, SPECIES } from "./species.js";
-import { FX, spawnBubble, spawnPuff } from "./scene.js";
+import { FX, obstacles, spawnBubble, spawnPuff } from "./scene.js";
+import { FISH_R } from "./fish-render.js";
 import { DO, hypoxia } from "./aging.js";
 
 /* 群れる種(school > 0.5)の形の調整。前後方向に一列に並ばないようにする */
@@ -20,6 +21,36 @@ const TRAVEL_K = 0.6;                      // 目標へ着くまでの見込み�
 const ZONE_UP = 0.3, ZONE_DOWN = 0.75;     // 層の広げ方:a' = 0.3a、b' = b + 0.75(0.95 − b)
 function xRange(L){ const m = Math.max(X_MARGIN_W * W, L * X_MARGIN_L); return [m, W - m]; }
 function randX(L){ const [lo, hi] = xRange(L); return lo + Math.random() * (hi - lo); }
+
+/* 向きを変える動き(U ターン):一度始めたら、速さに関係なく最後まで回りきる(途中で止まらない・逆戻りしない)。
+   始めるのは、進行方向が今の向きと逆で、速さが TURN_START × U を超える状態が TURN_HOLD 秒続いたとき(速さが小さいときの揺れでは始めない)。
+   回る間(TURN_T 秒)は、前へ進みながら弧を描く:横の速度を cos で反転させ、縦へ TURN_ARC × 速さ × sin で逃げる。横幅(flip)は smoothstep でなめらかに ±1 の間を動く。 */
+const TURN_START = 5, TURN_HOLD = 0.15, TURN_T = 0.95, TURN_ARC = 0.5;
+const smooth = p => p * p * (3 - 2 * p);
+
+/* 層の入れ替え(z が 0.45 をまたぐ=描く層が変わる)で魚が物の後ろへ瞬時に隠れる・前へ瞬時に現れるのを防ぐ。
+   魚の外接(FISH_R の正方形)が、流木・岩・中景の草の塗られる輪郭(scene.js の obstacles)と重なっている間は、またがない。 */
+export const LAYER_Z = 0.45;
+export function overlapsObstacle(x, y, R){
+  const x0 = x - R, y0 = y - R, x1 = x + R, y1 = y + R;
+  for (const o of obstacles) {
+    const b = o.bb;
+    if (b[2] < x0 || b[0] > x1 || b[3] < y0 || b[1] > y1) continue;
+    const pts = o.pts;
+    for (let i = 0; i < pts.length; i++) { const p = pts[i]; if (p[0] >= x0 && p[0] <= x1 && p[1] >= y0 && p[1] <= y1) return true; } // 物の頂点が箱の中
+    for (let i = 0; i <= 6; i++) for (let j = 0; j <= 6; j++) if (inPoly(x0 + (x1 - x0) * i / 6, y0 + (y1 - y0) * j / 6, pts)) return true; // 箱の格子点が物の中
+    for (let i = 0, k = pts.length - 1; i < pts.length; k = i++) if (segHitsBox(pts[k], pts[i], x0, y0, x1, y1)) return true; // 物の辺が箱を横切る
+  }
+  return false;
+}
+function inPoly(x, y, pts){ let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const a = pts[i], b = pts[j]; if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; }
+function segHitsBox(a, b, x0, y0, x1, y1){ // 線分 ab と箱の交差(Liang–Barsky)
+  let t0 = 0, t1 = 1; const dx = b[0] - a[0], dy = b[1] - a[1];
+  for (const [p, q] of [[-dx, a[0] - x0], [dx, x1 - a[0]], [-dy, a[1] - y0], [dy, y1 - a[1]]]) {
+    if (p === 0) { if (q < 0) return false; } else { const r = q / p; if (p < 0) { if (r > t1) return false; if (r > t0) t0 = r; } else { if (r < t0) return false; if (r < t1) t1 = r; } }
+  }
+  return true;
+}
 
 /* ---------------- 魚の生成 ---------------- */
 export const fishes = [];
@@ -51,7 +82,7 @@ export function makeFish(sp){
   const x = randX(S.len * U * 1.1); // 体長は最大(scale 1.12)に近い値で余白を取る
   const zn = baseZone(S);
   const y = sp === "cory" ? bottomY(x, z) - 10 * U : zoneY(x, lerp(zn[0], zn[1], Math.random()), z);
-  const f = { sp, x, y, z, zt: z, vx: (Math.random() - 0.5) * 20 * U, vy: 0, flip: Math.random() < 0.5 ? 1 : -1, pitch: 0, tilt: 0,
+  const f = { sp, x, y, z, zt: z, vx: (Math.random() - 0.5) * 20 * U, vy: 0, flip: Math.random() < 0.5 ? 1 : -1, turnT: 0, turnSide: 1, turnS: 0, turnDir: 0, turnV0: 0, turnHold: 0, pitch: 0, tilt: 0,
     phase: Math.random() * TAU, health: 1, hardy: 0.85 + Math.random() * 0.3, scale: 0.88 + Math.random() * 0.24,
     ox: Math.random() * 2 - 1, oy: Math.random() * 2 - 1, tx: x, ty: y, tTimer: Math.random() * 3, burst: 0,
     variant: Math.floor(Math.random() * S.variants), pale: 0, state: "forage", stateT: Math.random() * 4, spots: [] };
@@ -206,17 +237,47 @@ export function updateFish(f, dt){
   const accel = Math.min(1, dt * (1.2 + act));
   f.vx += (desx - f.vx) * accel;
   f.vy += (desy - f.vy) * accel;
-  f.x += f.vx * dt; f.y += f.vy * dt;
+  // 向きを変える途中(U ターン):横の速度は cos で反転し、縦へ弧を描いて逃げる(速度ベクトルを回していく)
+  let yArc = 0;
+  if (f.turnT > 0) {
+    f.turnT += dt;
+    const p = Math.min(1, f.turnT / TURN_T);
+    const e = smooth(p), th = Math.PI * e;
+    f.vx = f.turnSide * f.turnV0 * Math.cos(th) + sepx * 1.6; // 回る間も、ほかの魚との分離は効かせる(重なって詰まらないように)
+    yArc = f.turnDir * TURN_ARC * f.turnV0 * Math.sin(th);
+    f.turnS = Math.sin(th);
+  }
+  f.x += f.vx * dt; f.y += (f.vy + yArc) * dt;
   f.x = clamp(f.x, L * 0.6, W - L * 0.6);
   f.y = clamp(f.y, waterTop + L * 0.35, bottomY(f.x, f.z) - L * 0.22);
 
-  f.z += (f.zt - f.z) * dt * 0.08;
+  { // z は目標へゆっくり近づく。0.45 をまたぐ(描く層が変わる)ときは、外接が物の輪郭と重なっていなければまたぐ。重なっていれば手前で待つ
+    const z0 = f.z; let z1 = z0 + (f.zt - z0) * dt * 0.08;
+    if (S.solo !== true && f.sp !== "cory" && (z0 < LAYER_Z) !== (z1 < LAYER_Z)) {
+      const R = L * (0.72 + 0.38 * Math.max(z0, z1)) * FISH_R[f.sp]; // 描画時の体長は L × (0.72 + 0.38 z)。またぐ前後の大きいほうの z での外接の半径
+      if (overlapsObstacle(f.x, f.y, R)) z1 = z0 < LAYER_Z ? Math.min(z1, LAYER_Z - 1e-6) : Math.max(z1, LAYER_Z);
+    }
+    f.z = z1;
+  }
   if (f.sp !== "cory" && S.school < 0.5 && Math.random() < dt * 0.05) f.burst = 0.6;
   if (S.school > 0.5 && Math.random() < dt * 0.03) f.burst = 0.9;
   f.burst *= Math.exp(-dt * 2.2);
 
   // 向き・姿勢
-  if (Math.abs(f.vx) > 4 * U) { const tf = Math.sign(f.vx); f.flip += clamp(tf - f.flip, -dt * 4.5, dt * 4.5); }
+  if (f.turnT > 0) {
+    const p = Math.min(1, f.turnT / TURN_T);
+    f.flip = f.turnSide * (1 - 2 * smooth(p)); // 横幅の縮み:+側 → 0(正面向き)→ −側。smoothstep でなめらか(見た目の最小幅は描画側の FLIP_MIN)
+    if (p >= 1) { f.flip = -f.turnSide; f.turnT = 0; f.turnS = 0; f.turnHold = 0; }
+  } else {
+    const side = f.flip >= 0 ? 1 : -1;
+    if (Math.abs(f.vx) > TURN_START * U && Math.sign(f.vx) !== side) {
+      f.turnHold += dt;
+      if (f.turnHold >= TURN_HOLD) { // 回り始める。縦は水槽の中央へ向かって(群れの中心が上にあれば下へ、下にあれば上へ)逃げる
+        f.turnT = dt; f.turnSide = side; f.turnV0 = Math.abs(f.vx); f.turnHold = 0;
+        f.turnDir = schools[f.sp].cy < (waterTop + bottomY(f.x, f.z)) / 2 ? 1 : -1; f.turnS = 0; // 同種は群れの中心を基準に同じ側へ逃げる(隣どうしが上下逆へ逃げて交差しない)
+      }
+    } else f.turnHold = 0;
+  }
   const pt = clamp(Math.atan2(f.vy, Math.abs(f.vx) + 6 * U), -0.45, 0.45);
   f.pitch += (pt - f.pitch) * Math.min(1, dt * 4);
   let tilt = 0;
@@ -224,6 +285,6 @@ export function updateFish(f, dt){
   tilt += Math.pow(1 - f.health, 2) * (hot > 0 ? -0.35 : 0.45);
   f.tilt += (tilt - f.tilt) * Math.min(1, dt * 2);
   const sp = Math.hypot(f.vx, f.vy);
-  f.phase += dt * (2.5 + sp / L * 4.5) * S.wagRate * (hot > 0 ? 1 + hot * 0.5 : 1);
+  f.phase += dt * (2.5 + sp / L * 4.5 + f.turnS * 3) * S.wagRate * (hot > 0 ? 1 + hot * 0.5 : 1); // 回る間は尾を速く振る
   f.speedNow = sp;
 }

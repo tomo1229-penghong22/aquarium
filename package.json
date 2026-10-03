@@ -8,6 +8,7 @@
     "test": "node tests/smoke.mjs && node tests/aging.mjs && node tests/perf.mjs",
     "drawlog": "node tests/drawlog.mjs",
     "school": "node tests/school-metric.mjs",
+    "fishcheck": "node tests/k0-measure.mjs --check --minutes=2 --seeds=1",
     "release": "node tools/release.mjs",
     "serve": "python3 -m http.server 8000"
   },

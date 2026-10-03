@@ -838,9 +838,9 @@ for (const [sp, acts] of Object.entries(ACTS_NEW)) {
       // 魚:種 × 向き・傾き・位相(尾の振り)・速さ・奥行き・体調
       for (const sp of nonSolo) {
        for (const f of A.fishes.filter(q => q.sp === sp)) {   // 個体ごと(色の変種・大きさの個体差を含める)
-        const keep = { flip: f.flip, pitch: f.pitch, tilt: f.tilt, phase: f.phase, speedNow: f.speedNow, z: f.z, health: f.health, x: f.x, y: f.y };
-        for (const flip of [1, -0.4]) for (const pt of [-0.8, 0.8]) for (const z of [0, 1]) for (let ph = 0; ph < 6.3; ph += 1.3) for (const spd of [0, 1e4]) for (const hp of [1, 0.2]) {
-          Object.assign(f, { flip, pitch: pt, tilt: 0, phase: ph, speedNow: spd, z, health: hp, x: core.W * 0.5, y: core.H * 0.4 });
+        const keep = { turnS: f.turnS, turnDir: f.turnDir, flip: f.flip, pitch: f.pitch, tilt: f.tilt, phase: f.phase, speedNow: f.speedNow, z: f.z, health: f.health, x: f.x, y: f.y };
+        for (const flip of [1, -0.4]) for (const pt of [-0.8, 0.8]) for (const z of [0, 1]) for (let ph = 0; ph < 6.3; ph += 1.3) for (const spd of [0, 1e4]) for (const hp of [1, 0.2]) for (const [turnS, turnDir] of [[0, 0], [1, 1], [1, -1]]) { // turnS・turnDir:U ターンの途中(尾を強く振り、片側へ曲げる)
+          Object.assign(f, { turnS, turnDir, flip, pitch: pt, tilt: 0, phase: ph, speedNow: spd, z, health: hp, x: core.W * 0.5, y: core.H * 0.4 });
           const L = A.SPECIES[sp].len * core.U * f.scale * (0.72 + 0.38 * z);
           fr.liteSpritesRelease(); // 毎回作り直す(前の姿勢の大きめのキャンバスが残って検査が甘くならないように)
           for (let i = 0; i < 3; i++) fr.drawFishLite(f);
