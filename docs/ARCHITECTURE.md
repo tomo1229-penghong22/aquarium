@@ -125,6 +125,8 @@ loop(毎フレーム)
 - **なめた跡**(`scene.js`):状態 `tr`(`mw`・`mh`:マスクの大きさ、`glass`・`hard`:世代マスク `{ b: 世代ごとのキャンバス, head, prog, any, quiet }`、`cache`:跡あり版の作り置き `{ gA, gB, h[3] }`)。マスクは水槽の 1/4 の解像度で、新品では作らず、跡を付ける最初のときに作る。`buildAging()`(resize)で捨てる。苔の状態が下がったとき(清掃・リセット・`?aging` 後の変更)、`trailStrength()` が 0 になったとき(off)にも捨てる。
 - **性能による切り替え**(`governor.js`):状態は `mode`(`on` → `fading` → `off`)・`fade`(強さ)・猶予・3 秒窓の標本。`off` は戻らない。`updateTrails` は強さ(`trailStrength()`)を受け取り、`fading` の間は跡あり版を濃さを下げて作り直す。
 - **重なり・移動(R2)**:`occupants(self, key)` が、同じ面(`keyOf`:砂 / `r` + 番号 / `w` + 番号 / `gF` / `gB`)にいる個体の位置・半径と、ほかの個体の行き先の予約 `res` を返す。`blocked()`(動く先が近すぎる=半径の和 × `CRAWL.sep` 未満で、いまより近づくか)、`clearance()`(新しい居場所の余裕)、`freeSpot()`(空いた居場所を選ぶ)、`stepSurf` / `stepSand` / `stepGlass`(重ならない移動。脇へよける)が使う。エビの跳躍は放物線、オトの泳ぎは離れる向きを足してよける。貝のガラスへの往復は状態機械(`toSand` / `toRock` / `toEdge` / `tilt` / `climb` / `glass` / `descend` / `untilt` / `return`)。縁での連続的な変形は `fish-render.js` の `paintSnailTilt`。
+- **U ターンと姿勢の連続(issue #7 K4・K5)**:各個体の `f.cr` に、描いている向き `vs`(±1)・目標 `vt`・回りの進み `vp`(0〜1。0 = 回っていない)・食い違いが続いた秒数 `vq`・回っている/待っている `trn`・描く横の倍率(符号つき。テストが読む)`vw` を持つ。`turnMgr(c, dt)` が毎フレーム更新(横向きの姿のときだけ。ガラスの足の裏・縁の遷移中は `trn = false`)、`turnView(c)` が `[符号, 横幅]` を返し、`drawTurned(c, x, y, rot, call)` が体の向き `rot` の x 軸だけを縮めて `call(符号)` を呼ぶ(`PAINT` は変えない)。目標は `faceWant`。面の乗り換えは `swapSurface`(差を `c.rx c.ry c.rr` に残して `decayRes` で消す)、エビの跳躍の姿勢は `hopPose`、オトの泳ぎの着く姿勢は `otoGoal`・描く姿勢は `c.pose`。数値は `CRAWL.turnT`・`turnMin`・`turnHold`(`docs/SPEC.md` の「13.」)。
+- **連続性の計測**:`node tests/crawl-continuity.mjs [--minutes=5] [--seeds=1,2,3]`(`--json`、`--child`、`AQUARIUM_JS_ROOT` は k0-measure と同じ。お掃除生体は最大数、魚は既定)。基準 E(状態の切り替わりのフレームで描く位置・角度が、ふだんの 1 フレームの最大変化を超えない。位置は 1.1 倍まで許容)と基準 F(1 フレームで左右が反転する回数 0、向きの変化の所要時間、重なりの延べ時間)を表にする。`npm test` には入れていない(約 6 分)。
 - **不変条件**
   - 跡は見た目だけの層で、苔の量(`algaeGlass`・`algaeHard`)を一切変えない。保存もしない。
   - 跡の更新で `getImageData` / `putImageData` を使わない(マスクはキャンバスへの描画と `drawImage` だけ)。新品(苔 0.002 未満)では、マスクもキャッシュも作らず、描画命令を出さない。
@@ -159,6 +161,7 @@ loop(毎フレーム)
 | `glassAge` | ガラスの苔の実効秒(`aging.js`。お掃除生体で遅くなる。保存する) |
 | `lastClean` / `lastFilter` | 前回の水替え・清掃/フィルター掃除の実時刻(epoch ms。`aging.js`) |
 | `f.cr` | お掃除生体の位置・状態(`crawlers.js`) |
+| `obstacles` | 流木・岩・中景の草の塗られる輪郭の多角形(`scene.js`。`buildScene()` の末尾で作り置き。魚の層の入れ替えの判定用。保存しない) |
 | なめた跡 `tr` | 跡マスク(世代ごとのキャンバス)と跡あり版の作り置き(`scene.js`。保存しない) |
 | `GOV` の `mode` / `fade` | 性能による切り替えの状態(`governor.js`。保存しない) |
 | `nightOn` / `nightT` | 夜モードの目標 / 補間中の値(0=昼, 1=夜) |
@@ -199,12 +202,19 @@ loop(毎フレーム)
 ## 魚の描き方
 
 - `PAINT[種](L, wag, f)` が、原点を体の中心、頭を +x 方向として1匹を描く。
-- `drawFish(f)` が、位置・向き(`flip` の符号で左右反転、絶対値で振り向きの薄さ)・傾き(`pitch + tilt`)・透明度(`BASE_A = SPECIES.finAlpha`:ひれ・膜、`BODY_A = 1`:体)を設定してから `PAINT` を呼ぶ。
+- `drawFish(f)` が、位置・向き(`flip` の符号で左右反転、絶対値で振り向きの薄さ。横幅は `max(FLIP_MIN, |flip|)`、`FLIP_MIN` = 0.2)・尾の振り(`fishWag(f, S)`:U ターン中は強く片側へ曲げる)・傾き(`pitch + tilt`)・透明度(`BASE_A = SPECIES.finAlpha`:ひれ・膜、`BODY_A = 1`:体)を設定してから `PAINT` を呼ぶ。
 - 共通の部品:`bodyPath`、`forkTail`、`fanTail`、`fin`、`withTail`(尾の振りとしなり)、`shade`(上からの光・背中の艶・弱ったときの色あせ・縁の光)、`finRays`、`eye`、`pectoral`。
 - 使う変数は `f.phase`、`f.pale`、`f.health`、`f.spots`、`f.variant`、`f.ox`、`f.tailScale`(グッピーのみ)。
 - **透明度の規則**:体は不透明(`BODY_A`。ふだん 1。出現・消滅のフェードの間だけ下がる)、ひれ・尾の膜だけ半透明(`BASE_A` = `finAlpha` × フェード)。`PAINT` の中は `finOn()`(= `ctx.globalAlpha = BASE_A`)と `bodyOn()`(= `BODY_A`)で切り替える。尾(`withTail`)と胸びれ(`pectoral`)は自分で切り替える。体の奥のひれ・尾は体より先に描く(体で隠れる)。体の色むらは `globalAlpha` ではなく `rgba` で重ねる。`AUDIT.hook` は、切り替えのたびに種類("fin" / "finNear" / "body")をテストの監査へ知らせる(通常は `null` で何もしない)。奥行きの淡さは透明度ではなく、描画順で後から重なる霞の層が受け持つ。
 - **ヤマトヌマエビ**:`paintShrimpParts` が、共用のオフスクリーン(`shrimpBuffer`。全員で 1 枚。必要な大きさが増えたときだけ作り直す。毎フレームの生成なし)にすべて不透明で描き、メインの `ctx` には `BASE_A`(= `finAlpha` × フェード)で `drawImage` 1 回だけ出す。オフスクリーンの解像度は、そのときの変換の拡大率(`ctx.getTransform()`)に合わせる。`ctx` を一時的にオフスクリーンの `ctx` へ差し替えて描く(パネルのアイコン・ポップアップと同じ方法)。
 - お掃除生体の `PAINT`(`oto`・`shrimp`・`snail`)も横向き(頭が +x)。足元までの距離は `GROUND`(体長の倍率)。`drawCreature` が位置・角度・向き・透明度を設定して呼ぶ。エビは `f.pick`・`f.clawT`・`f.wash`・`f.hold`(前脚の動き)、貝は `f.hide`(殻に引っこむ度合い)を読む(ポップアップが設定する)。前面ガラスの貝は別の描画 `paintSnailFront`(足の裏と口)。
+
+## 魚の向きと層の入れ替え(issue #7。`fish-behavior.js`・`fish-render.js`・`scene.js`)
+
+- **向きの状態**(`makeFish` が初期化、`updateFish` の末尾が更新):`f.flip`(±1。回る間は +側 → 0 → −側)、`f.turnT`(0 = 回っていない。回る間は経過秒)、`f.turnSide`(回り始めの向き ±1)、`f.turnV0`(回り始めの `|vx|`)、`f.turnDir`(縦に逃げる向き +1 下 / −1 上)、`f.turnS`(0〜1 = `sin(π·smoothstep(p))`。描画の尾の曲げに使う)、`f.turnHold`(開始条件を満たしている秒数)。定数は `fish-behavior.js` の `TURN_START`(5)・`TURN_HOLD`(0.15)・`TURN_T`(0.95)・`TURN_ARC`(0.5)、`fish-render.js` の `FLIP_MIN`(0.2)・`TURN_AMP`(0.4)・`TURN_BEND`(0.3)。回る間は `updateFish` が速度の積分の前に `f.vx` を上書きし(`v0·cos(π·smoothstep(p))` + 分離)、位置の更新で縦の弧(`yArc`)を足す。`f.vy` は通常どおり更新する。回りきったら `flip = −turnSide`、`turnT = 0`。
+- **層の入れ替えの判定**:`updateFish` の `z` の更新で、`z` が `LAYER_Z`(0.45)をまたぐ更新のときだけ `overlapsObstacle(x, y, R)`(`R` = `FISH_R[種] × 体長 × (0.72 + 0.38 max(z0, z1))`)を呼ぶ。重なっていれば `z` を `LAYER_Z − 1e-6`(奥側)か `LAYER_Z`(手前側)で止める。コリドラスは対象外。
+- **`obstacles`**(`scene.js`。`{ pts, bb }` の配列):`buildScene()` の末尾で `buildObstacles()` が作る。流木・岩・中景の草(`plants.mid`)の描画関数(`drawWood`・`drawRock`・`drawSword`・`drawFern`・`drawLotus`)を、塗る多角形を記録するだけの `ctx` に差し替えて実際に呼んで集める(描画の式と食い違わない)。中景の草は揺れの位相 4 つ(`OBST_T`)の輪郭の和。`Path2D`(`drawLotus` が `new Path2D()` を使う)は、作成中だけ `globalThis.Path2D` を記録用のクラスに差し替え、`finally` で戻す(元がなければ `delete`)。`ctx` の差し替えも `finally` で戻す。毎フレームは作らない。描画命令は一切出さないので、描画ログには影響しない。
+- 計測:`npm run fishcheck`(`tests/k0-measure.mjs --check --minutes=2 --seeds=1`、約 3 分)。基準 B(重なった状態での層の入れ替え 0、途中停止・逆戻り 0、横幅 30% 未満が 0.4 秒超続く区間 0、反転の所要時間 0.6〜1.0 秒、NaN・画面外・描画されない 0)を判定する。`node tests/k0-measure.mjs [--minutes=5] [--seeds=1,2,3]` は既定の数と全種最大数の表を出す(`--json` で生データ、`--from=ファイル` で表に戻す、`--child` は 1 構成・1 シード)。`AQUARIUM_JS_ROOT` で別の版の `js/` を対象にできる(変更の前後比較)。`K0_DEBUG=1`(重なった層の入れ替えの詳細)・`K0_STACK=1`(魚どうしの完全重なり)は標準エラー出力に出す。完全重なり(中心が体長の 0.15 倍未満)は起動直後の配置に左右され、シードごとのばらつきが大きい(0〜575 フレーム)ので、比較には 8 シード以上要る。
 
 ## 水草の揺れ
 
@@ -237,9 +247,10 @@ loop(毎フレーム)
 
 1. `npm test`:ブラウザなしで(不透明化の「監査」を含む:`AUDIT.hook` で体・ひれの区間を記録用のコンテキストに知らせ、体の塗りの `globalAlpha` が 1、ひれの膜だけ半透明、エビは共用の 1 枚から 1 回だけ貼ることを確かめる)実行時エラー・NaN・体調モデル・ポップアップの詰まり・餌を食べられるか・お掃除生体の動き(2 分間のシミュレーションを含む)・なめた跡と性能による切り替えを確かめる(所要 約 80 秒)。Canvas と DOM のモックをグローバルに置いてから `js/main.js` を import する方式で、内部状態には各モジュールの export 経由でアクセスする。
    - 見た目を変えない変更(分割・整理など)では、`npm run drawlog` も実行する。描画命令の列を `tests/baseline/` の基準ログと比べ、一致すれば描画結果は同一(所要 約 40〜50 秒)。基準の `drawlog.log.gz` はリポジトリ外で、ハッシュ `drawlog.sha256` だけを管理する。
-   - 現在の `npm run drawlog` は、基準ログ(お掃除生体・軽量モードの導入後に取り直したもの)と一致する(軽量モードはオフが既定で、`liteOn=false` の描画命令は変えない)。ハーネスは性能の測定を固定している(`governor.GOV.override = 0`)。お掃除生体を持たない旧版との比較をするときだけ、新種を ORDER から外し(`species.ORDER.length = 6`)、砂煙を切る(`scene.FX.puff = false`)(CLAUDE.md の落とし穴のとおり)。基準の取り直しは、見た目を人間が了承した後に行う(`node tests/drawlog.mjs --record`)。
+   - 現在の `npm run drawlog` は、基準ログ(issue #7 の U ターン・層の入れ替えの後に取り直したもの)と一致する(軽量モードはオフが既定で、`liteOn=false` の描画命令は変えない)。ハーネスは性能の測定を固定している(`governor.GOV.override = 0`)。お掃除生体を持たない旧版との比較をするときだけ、新種を ORDER から外し(`species.ORDER.length = 6`)、砂煙を切る(`scene.FX.puff = false`)(CLAUDE.md の落とし穴のとおり)。基準の取り直しは、見た目を人間が了承した後に行う(`node tests/drawlog.mjs --record`)。
    - `drawlog` は 24時間計が現在時刻に依存するため、`TZ=UTC`・固定時刻 6:30(UTC)で実行する。実行環境のタイムゾーンや時刻に描画ログが左右されない。
    - 群れの形を確かめるときは `npm run school`。
+   - 魚の向き・層の入れ替えを確かめるときは `npm run fishcheck`(約 3 分)。お掃除生体の位置・角度の連続性と U ターンは `node tests/crawl-continuity.mjs`(約 6 分)。どちらも `npm test` には入れていない。魚やお掃除生体の動き・向き・描く位置を変えたら実行する。
 2. 不透明化の画素確認:`npm run serve` → `http://localhost:8000/tests/pixels.html` を実際のブラウザで開く。魚 6 種・オト・エビ・貝を赤と緑の背景に描き、体の画素が背景に影響されない(差 ≤ 2/255)、ひれの膜は背景が見える、エビは背景がうっすら見えて重なりで濃くならない、貝の殻・足は不透明、を判定して表示する(結果は `window.__pixels`)。背景の物体(岩・流木・水草・浮草の葉)も、内部の画素が背景に影響されないことを判定する(3 倍の解像度で描き、周囲 2 画素がすべて塗られた内部の画素のうち、別々の不透明な図形のあいだから背景が見える「すき間」を除いた「面状」の透けた画素が 0)。浮草の細い根(`rgba(225,215,185,0.55)` の線)は、ひれの膜と同じく物理的に透ける部分として許容し、その線を描かずに判定する。水槽全体(背景・水草・岩・流木・霞)と物体ごとの平均の明度・彩度も表示する(判定ではない。`?layout=old` を付けると、変更前の層の透明度と霞の値で描く。6599b24 のチェックアウトにこのファイルをコピーして `?layout=old` で開けば、変更前の見え方と比べられる)。`sw.js` の `PRECACHE` には入れない(テスト用。`npm test` の検出は `js/`・`icons/`・manifest・`index.html` だけを見るので `tests/` は対象外)。
 3. `npm run serve` → `http://localhost:8000/`:見た目と操作を確認する(`file://` では開けない)。チェックしたい点の例:
    - 昼と夜の切り替え、18℃・25℃・34℃ での魚の様子
