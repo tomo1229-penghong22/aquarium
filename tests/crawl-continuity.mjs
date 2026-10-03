@@ -37,13 +37,18 @@ function report(rs, seeds) {
       indivPos.push(...r.sp[sp].indPos); indivRot.push(...r.sp[sp].indRot);
       for (const [k, v] of Object.entries(r.sp[sp].tr)) {
         const t = (tot[k] ??= { n: 0, maxPos: 0, maxRot: 0, overPos: 0, overRot: 0, over: 0, sxFlip: 0 });
-        t.n += v.n; t.maxPos = Math.max(t.maxPos, v.maxPos); t.maxRot = Math.max(t.maxRot, v.maxRot); t.overPos += v.overPos; t.overRot += v.overRot; t.over += v.over; t.sxFlip += v.sxFlip;
+        t.n += v.n; t.maxPos = Math.max(t.maxPos, v.maxPos); t.maxRot = Math.max(t.maxRot, v.maxRot); t.overPos += v.overPos; t.overRot += v.overRot; t.over += v.over; t.sxFlip += v.sxFlip; t.ratio = Math.max(t.ratio ?? 0, v.ratio ?? 0);
       }
+    }
+    { // 基準 F:U ターン
+      const F = rs.reduce((o, r) => { const q = r.sp[sp].F; for (const k of ["frames", "signChanges", "instant", "runs", "reversals", "stalls"]) o[k] += q[k]; o.durs.push(...q.durs); return o; }, { frames: 0, signChanges: 0, instant: 0, runs: 0, reversals: 0, stalls: 0, durs: [] });
+      const d = [...F.durs].sort((x, y) => x - y), dd = d.length ? [d[0], d[Math.floor(d.length / 2)], d[d.length - 1]].map(v => v.toFixed(2)).join(" / ") : "-";
+      console.log(`\n[F] ${sp}:U ターン ${F.runs} 回(完了 ${d.length})、1 フレームで左右反転(最小幅より大きいまま符号が変わる) ${F.instant} 回、符号の切り替わり ${F.signChanges} 回、途中停止 ${F.stalls}、逆戻り ${F.reversals}、所要時間 最小/中央/最大 ${dd} 秒`);
     }
     console.log(`\n### ${sp}(個体 ${rs[0].n[sp]}。状態内の向き反転 ${rs.reduce((a, r) => a + r.sp[sp].inFlip, 0)} 回、NaN ${rs.reduce((a, r) => a + r.sp[sp].nan, 0)}、描画数の不一致 ${rs.reduce((a, r) => a + r.sp[sp].mismatch, 0)})`);
     console.log(`ふだんの動きの 1 フレームの最大変化(全個体の最大):位置 ${f2(normPos)} U、角度 ${f2(normRot)} rad`);
     console.log("| 切り替わり | 回数 | 位置の最大変化 U | 角度の最大変化 rad | 位置が個体のふだんを超えた回数 | 角度が個体のふだんを超えた回数 | どちらか超えた回数 | 向き(sx)反転 |\n|---|---|---|---|---|---|---|---|");
-    for (const [k, t] of Object.entries(tot).sort()) console.log(`| ${k} | ${t.n} | ${f2(t.maxPos)} | ${f2(t.maxRot)} | ${t.overPos} | ${t.overRot} | ${t.over} | ${t.sxFlip} |`);
+    for (const [k, t] of Object.entries(tot).sort()) console.log(`| ${k} | ${t.n} | ${f2(t.maxPos)} | ${f2(t.maxRot)} | ${t.overPos} | ${t.overRot} | ${t.over} | ${t.sxFlip} | ${t.ratio ? t.ratio.toFixed(2) : "-"} |`);
   }
 }
 
@@ -100,9 +105,28 @@ async function child() {
   const wrapA = a => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
   const U = core.U, dt = 1 / 60, FR = Math.round(MINUTES * 60 / dt), origCtx = core.ctx;
   const out = { U, n: {}, sp: {} };
-  for (const s of SP) { out.n[s] = solos.filter(f => f.sp === s).length; out.sp[s] = { inFlip: 0, nan: 0, mismatch: 0, tr: {}, normPos: 0, normRot: 0, indPos: [], indRot: [] }; }
+  for (const s of SP) { out.n[s] = solos.filter(f => f.sp === s).length; out.sp[s] = { F: { frames: 0, signChanges: 0, instant: 0, runs: 0, durs: [], reversals: 0, stalls: 0, minSeen: 9, flipsAtMinOnly: 0 }, inFlip: 0, nan: 0, mismatch: 0, tr: {}, normPos: 0, normRot: 0, indPos: [], indRot: [] }; }
   const st = new Map(); // 個体ごと { prev:{x,y,rot,sx,kind}, normPos, normRot, trans:[{key,dp,dr,flip}] }
   for (const f of solos) st.set(f, { prev: null, normPos: 0, normRot: 0, trans: [] });
+  // F:描いた符号付き横倍率 c.vw の追跡(1 フレームでの左右反転=最小幅より大きいまま符号が変わる、回る所要時間、途中停止・逆戻り)
+  const trackF = (f, t, vw) => {
+    const a = out.sp[f.sp].F, mn = cr.CRAWL.turnMin?.[f.sp] ?? 0.2;
+    if (vw === null) { t.F = null; return; }
+    const pv = t.F ? t.F.vw : null; a.frames++;
+    if (pv !== null && Math.sign(vw) !== Math.sign(pv)) { a.signChanges++; if (Math.abs(vw) > mn + 1e-6 || Math.abs(pv) > mn + 1e-6) a.instant++; }
+    const av = Math.abs(vw), turning = av < 1 - 1e-9;
+    let r = t.F?.run ?? null;
+    if (turning && !r) { r = { n: 0, dir: -1, last: 1, still: 0, skip: pv === null }; if (!r.skip) a.runs++; } // (記録の開始時にすでに回っていた分は数えない)
+    if (r) {
+      r.n++;
+      if (av < r.last - 1e-9) { if (r.dir === 1) a.reversals++; r.dir = -1; r.still = 0; }
+      else if (av > r.last + 1e-9) { r.dir = 1; r.still = 0; }
+      else if (av > mn + 1e-6 && av < 1 - 1e-9) { r.still++; if (r.still === 3) a.stalls++; }
+      r.last = av;
+      if (!turning) { if (!r.skip) a.durs.push(r.n / 60); r = null; }
+    }
+    t.F = { vw, run: r };
+  };
   const LAYERS = ["back", "low", "front", "glass"];
   for (let n = 0; n < FR; n++) {
     frame();
@@ -123,7 +147,9 @@ async function child() {
       const kind = kindOf(f), c = f.cr, L0 = SPECIES[f.sp].len * U * f.scale;
       // 正規化:角度は「鼻先の向き」h = rot(左向きなら +π)。縁の遷移描画(原点が接地点)は、横向きの姿の中心(接地点より GROUND 分上)に合わせ、p=0 で横向き・p=1 で足の裏の中心へ移る点として扱う
       const lift = kind === "tilt" ? fr.GROUND.snail * L0 * (1 - c.tl) : 0;
-      const p = { x: d.x, y: d.y - lift, rot: d.rot + (d.sx < 0 ? Math.PI : 0), sx: d.sx, kind };
+      const sxD = typeof c.vw === "number" ? (c.vw >= 0 ? 1 : -1) : d.sx;
+      const p = { x: d.x, y: d.y - lift, rot: d.rot + (sxD < 0 ? Math.PI : 0), sx: sxD, kind };
+      trackF(f, st.get(f), typeof c.vw === "number" ? c.vw : (f.sp === "snail" && c.surf === "gF" && c.tl >= 1 ? null : d.sx));
       if (t.prev) {
         const dp = Math.hypot(p.x - t.prev.x, p.y - t.prev.y) / U, dr = Math.abs(wrapA(p.rot - t.prev.rot));
         if (p.kind === t.prev.kind) {
@@ -140,7 +166,7 @@ async function child() {
     for (const x of t.trans) {
       const r = (a.tr[x.key] ??= { n: 0, maxPos: 0, maxRot: 0, overPos: 0, overRot: 0, over: 0, sxFlip: 0 });
       const op = x.dp > t.normPos + 0.05, orr = x.dr > t.normRot + 0.01; // 許容:位置 0.05U(画面で約 0.05 px)、角度 0.01 rad(約 0.6 度)
-      r.n++; r.maxPos = Math.max(r.maxPos, x.dp); r.maxRot = Math.max(r.maxRot, x.dr); if (op) r.overPos++; if (orr) r.overRot++; if (op || orr) r.over++; if (x.flip) r.sxFlip++;
+      r.n++; if (op) r.ratio = Math.max(r.ratio ?? 0, x.dp / Math.max(t.normPos, 1e-9)); r.maxPos = Math.max(r.maxPos, x.dp); r.maxRot = Math.max(r.maxRot, x.dr); if (op) r.overPos++; if (orr) r.overRot++; if (op || orr) r.over++; if (x.flip) r.sxFlip++;
     }
   }
   console.log(JSON.stringify(out));

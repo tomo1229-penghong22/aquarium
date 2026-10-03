@@ -22,6 +22,10 @@ export const CRAWL = {
   shrimpHopP: 0.15,           //   つまむのが終わるたびに跳ねて移る確率
   hopHeight: 14,              //   跳躍の高さ(U)。放物線 y = 4h·e(1−e)。時間は距離 ÷ 110U/s(0.5〜1.4 秒)
   otoStick: [6, 16], otoSwimV: 1.6,  // オト:吸いついている時間(秒)、移動の速さ(種の速さの倍率)
+  // 向き(左右)を変えるときの U ターン(瞬時の鏡映をやめ、横幅が縮んで反対向きへ開く。魚は最小幅 0.2)
+  turnT: { shrimp: 0.7, oto: 0.7, snail: 2.0 },        // 向きを変えるのにかける時間(秒)。エビ・オト 0.4〜1.0、貝 1.0〜3.0
+  turnMin: { shrimp: 0.22, oto: 0.2, snail: 0.45 },    // 正面向きの最小の横幅(体長に対する描画の倍率)。体を正面から見た厚み:エビは甲の幅 約 0.2 L、オトは魚と同じ細身で 0.2、貝は殻の幅が体長の約半分(殻・足の丸い広がり)で 0.45
+  turnHold: 0.15,             //   向きの食い違いが続いて(秒)から回り始める(小さな揺れでは回らない)
   sep: 1.0,                   // 同じ面の個体どうしの最小の中心距離 = (半径の和)× sep。これより近づく動きはしない
 };
 const WEIGHTS = {
@@ -209,10 +213,11 @@ function attach(c, spot){
 function initCr(f){
   const c = { sp: f.sp, surf: "sand", id: 0, s: 0.5, z: 0, dep: 0, fx: 0, fy: 0, x: 0, y: 0, tx: 1, ty: 0, ux: 0, uy: -1, dir: Math.random() < 0.5 ? 1 : -1,
     st: f.sp === "oto" ? "stick" : "rest", t: rnd(0, 5), fade: 1, pk: 0, graze: 0, gz: 0, gt: rnd(1, 3), clk: 0, pause: 0, bx: 0, by: 0, tl: 0, res: null,
-    hd: Math.random() < 0.5 ? 0 : Math.PI, hdD: 0, hdT: 3, ang: 0, sx: 1, sa: 0, ssx: 1, swim: null, hp: 0, hsx: 1, rx: 0, ry: 0, rr: 0, tr: 0, sT: 0, dA: 1, pose: null, sw0: null };
+    hd: Math.random() < 0.5 ? 0 : Math.PI, hdD: 0, hdT: 3, ang: 0, sx: 1, sa: 0, ssx: 1, swim: null, hp: 0, hsx: 1, rx: 0, ry: 0, rr: 0, tr: 0, sT: 0, dA: 1, pose: null, sw0: null, vs: undefined, vt: 1, vp: 0, vq: 0, trn: false, vw: null };
   f.cr = c; // (半径の計算が f.cr を読むので、先に付ける)
   attach(c, freeSpot(f, () => randSpot(f.sp, 0)));
   c.hdD = c.hd; f.phase = Math.random() * TAU;
+  c.vs = c.vt = faceWant(c); // 描く向き(最初は目標と同じ)
   return c;
 }
 
@@ -227,6 +232,28 @@ function swapSurface(f, c, change){
   c.dir = o[3] * (dotT(c) >= 0 ? 1 : -1); // 新しい面でも同じ向き(左右)を向いたままにする
   const n = surfacePose(c, L0, G, c.dir);
   c.rx = o[0] - n[0]; c.ry = o[1] - n[1]; c.rr = wrapA(o[2] - n[2]);
+}
+/* 向き(左右)の目標(+1 / −1):泳ぎ中は泳ぐ向き、ガラスでは c.sx、面の上では進む向き c.dir と面の傾きから */
+function faceWant(c){
+  if (c.sp === "oto" && c.st === "swim") return c.ssx;
+  if (onGlass(c)) return c.sx;
+  return (dotT(c) >= 0 ? 1 : -1) * c.dir;
+}
+/* U ターンの管理。描いている向き c.vs が目標と違う状態が turnHold 秒続いたら、turnT 秒かけて回る(c.vp:0〜1 の進み。回り始めたら回りきる。途中で目標が戻っても最後まで回り、そのあとで改めて判断する)。
+   c.trn:回っている間・回り始めを待つ間(歩く・這うのを止める目安) */
+function turnMgr(c, dt){
+  const want = faceWant(c);
+  if (c.vs === undefined) { c.vs = c.vt = want; c.vp = 0; c.vq = 0; }
+  if (c.vp > 0) { c.vp += dt / CRAWL.turnT[c.sp]; if (c.vp >= 1) { c.vs = c.vt; c.vp = 0; c.vq = 0; } }
+  else if (want !== c.vs) { c.vq += dt; if (c.vq >= CRAWL.turnHold) { c.vt = want; c.vp = 1e-6; } }
+  else c.vq = 0;
+  c.trn = c.vp > 0 || want !== c.vs;
+}
+/* 描く向きと横幅 [sx(±1), w]。回る間 w は 1 → 0(最小幅で止めて)→ 1(smoothstep)。符号は幅が最小のところで切り替わる */
+function turnView(c){
+  if (c.vs === undefined) c.vs = c.vt = 1;
+  const wf = c.vp > 0 ? c.vs * (1 - 2 * ss(Math.min(c.vp, 1))) : c.vs;
+  return [wf >= 0 ? 1 : -1, Math.max(CRAWL.turnMin[c.sp], Math.abs(wf))];
 }
 const decayRes = (c, dt) => { const k = Math.exp(-dt / 0.5); c.rx *= k; c.ry *= k; c.rr *= k; if (Math.abs(c.rx) + Math.abs(c.ry) + Math.abs(c.rr) < 1e-4) c.rx = c.ry = c.rr = 0; };
 /* 面の上を s の方向(c.dir)へ v で進む。同じ面の誰かに近づきすぎるなら動かず、向きを変えて少し待つ。端で折り返す。動いたら true */
@@ -247,7 +274,7 @@ function stepSand(f, c, tx, ty, v, dt){
     const nx = clamp(x0 + Math.cos(h + off) * v * dt, 0.03 * W, 0.97 * W), ny = y0 + Math.sin(h + off) * v * dt, base = sandPos(nx, c.z, 0), full = yEdge() - base;
     const probe = { ...c, s: nx / W, dep: clamp((ny - base) / (full || 1), 0, 1) }; place(probe);
     if (blocked(f, c, probe.x, probe.y, "sand")) continue;
-    c.s = probe.s; c.dep = probe.dep; if (Math.abs(nx - x0) > 0.05 * U * 0 + 1e-6) c.dir = nx > x0 ? 1 : -1;
+    c.s = probe.s; c.dep = probe.dep; if (Math.abs(nx - x0) > 0.3 * v * dt) c.dir = nx > x0 ? 1 : -1; // (ほぼ縦の動きでは向きを変えない)
     return false;
   }
   c.pause = rnd(0.5, 1.2); return false;
@@ -276,6 +303,7 @@ function pickEdgeX(f, x0){
 function updSnail(f, c, S, act, dt){
   c.bx *= Math.exp(-dt / 1.0); c.by *= Math.exp(-dt / 1.0); if (Math.abs(c.bx) < 0.01) c.bx = 0; if (Math.abs(c.by) < 0.01) c.by = 0;
   decayRes(c, dt); c.pdir = c.dir;
+  if (c.surf !== "gF" && !(c.tl > 0)) turnMgr(c, dt); else c.trn = false; // 横向きの姿のときだけ U ターン(ガラスの足の裏は面内の回転 hdD)
   if (c.surf === "gF" && (c.st === "rest" || c.st === "move")) { c.st = "glass"; c.tl = 1; } // (テストなどでガラスへ置かれた貝)
   const onG = c.surf === "gF" || c.tl > 0;
   f.phase += dt * (onG ? 1.2 : 0.5) * act;
@@ -296,13 +324,13 @@ function updSnail(f, c, S, act, dt){
       }
       break;
     case "move":
-      c.t -= dt; stepSurf(f, c, v, dt);
+      c.t -= dt; if (!c.trn) stepSurf(f, c, v, dt); // 向きを変える間はその場で
       if (c.t <= 0) { c.st = "rest"; c.t = pickR(CRAWL.snailRest); }
       break;
     case "toSand": { // 岩・流木を地面に近い端まで降りて、砂へ移る(端の点と砂の点の差は、短い間に滑らかに消す)
       const pl = polyOf(c), endS = pl.gEnd === 0 ? pl.sn[0] : pl.sn[1];
       c.dir = endS < c.s ? -1 : 1;
-      stepSurf(f, c, v, dt); if (c.pause > 0) break;
+      if (!c.trn) stepSurf(f, c, v, dt); if (c.pause > 0) break;
       if (Math.abs(c.s - endS) * pl.len < 0.8 * U) {
         if (clearance(f, "sand", c.x, sandPos(c.x, 0, 0)) < 1) { c.pause = rnd(0.8, 1.6); break; } // 砂の入口に先客がいれば、端で待つ
         swapSurface(f, c, () => { const x0 = c.x, y0 = c.y; c.surf = "sand"; c.s = x0 / W; c.z = 0; c.dep = 0; c.bx = c.by = 0; place(c); c.bx = x0 - c.x; c.by = y0 - c.y; });
@@ -310,9 +338,9 @@ function updSnail(f, c, S, act, dt){
       break;
     }
     case "toEdge": // 砂の上を手前の縁(前面ガラスとの境目)へ向かって斜めに這う
-      if (stepSand(f, c, c.edgeX, yEdge(), v * 0.8, dt)) {
+      if (!c.trn && stepSand(f, c, c.edgeX, yEdge(), v * 0.8, dt)) {
         if (clearance(f, "gF", c.x, yEdge()) < 1) { c.pause = rnd(0.8, 1.6); break; } // ガラスの縁に先客がいれば待つ
-        c.st = "tilt"; c.tl = 0.001; c.tr = 0;
+        c.st = "tilt"; c.tl = 0.001; c.tr = 0; c.vp = 0; c.vs = faceWant(c); // 縁の遷移描画は、いま描いている向きのまま(回っていないときだけここへ来る)
       }
       break;
     case "tilt": // 縁で、横向きの姿から足の裏を見せる姿へゆっくり向きを変える
@@ -342,7 +370,7 @@ function updSnail(f, c, S, act, dt){
       c.hd = Math.atan2(dy, dx); c.hdD += wrapA(c.hd - c.hdD) * Math.min(1, dt * 1.5);
       if (d < Math.max(1 * U, v * 1.2 * dt)) {
         if (clearance(f, "sand", c.edgeX, yEdge()) < 1) { c.pause = rnd(0.8, 1.6); break; } // 砂の縁に先客がいれば待つ
-        c.fx = c.edgeX / W; c.fy = yEdge() / H; c.dir = Math.cos(c.hdD) >= 0 ? 1 : -1; c.tr = wrapA(c.hdD - (c.dir >= 0 ? 0 : Math.PI)); c.st = "untilt"; break;
+        c.fx = c.edgeX / W; c.fy = yEdge() / H; c.dir = Math.cos(c.hdD) >= 0 ? 1 : -1; c.tr = wrapA(c.hdD - (c.dir >= 0 ? 0 : Math.PI)); c.vs = c.dir >= 0 ? 1 : -1; c.vp = 0; c.vq = 0; c.st = "untilt"; break;
       }
       stepGlass(f, c, c.hd, v * 1.2, dt);
       break;
@@ -352,14 +380,14 @@ function updSnail(f, c, S, act, dt){
       if (c.tl <= 0) { c.tl = 0; c.surf = "sand"; c.s = c.fx; c.z = 0; c.dep = 1; c.bx = c.by = 0; c.st = "return"; }
       break;
     case "return": // 砂の上を奥のほうへ戻る
-      if (stepSand(f, c, c.s * W + rnd(-1, 1) * 0, sandPos(c.s * W, c.z, 0), v * 0.8, dt)) { c.dep = 0; c.st = "rest"; c.t = pickR(CRAWL.snailRest); }
+      if (!c.trn && stepSand(f, c, c.s * W + rnd(-1, 1) * 0, sandPos(c.s * W, c.z, 0), v * 0.8, dt)) { c.dep = 0; c.st = "rest"; c.t = pickR(CRAWL.snailRest); }
       break;
     case "toRock": { // 砂の上を岩・流木の地面に近い端まで這って、登る
       const g = c.climb, pl = g.pl, endS = pl.gEnd === 0 ? pl.sn[0] : pl.sn[1], ep = raw(pl, endS);
-      if (stepSand(f, c, ep[0], sandPos(ep[0], c.z, 0), v * 0.9, dt)) {
+      if (!c.trn && stepSand(f, c, ep[0], sandPos(ep[0], c.z, 0), v * 0.9, dt)) {
         if (clearance(f, keyOf({ surf: g.surf, id: g.id }), ep[0], ep[1]) < 1) { c.pause = rnd(0.8, 1.6); break; } // 岩・流木の入口に先客がいれば、砂で待つ
         // 登る向き(左右)が、いま向いている向きと逆なら、向きを瞬間に変えずに登るのをやめる(砂で休む)
-        const dn = pl.gEnd === 0 ? 1 : -1, q0 = raw(pl, endS - 0.04), q1 = raw(pl, endS + 0.04), nose = dn * (q1[0] - q0[0]), face = surfacePose(c, SPECIES[f.sp].len * U * f.scale, GROUND.snail, c.pdir ?? c.dir)[3];
+        const dn = pl.gEnd === 0 ? 1 : -1, q0 = raw(pl, endS - 0.04), q1 = raw(pl, endS + 0.04), nose = dn * (q1[0] - q0[0]), face = c.vs;
         if (nose * face < 0 && Math.abs(nose) > 0.2 * Math.hypot(q1[0] - q0[0], q1[1] - q0[1])) { c.st = "rest"; c.t = pickR(CRAWL.snailRest); c.climb = null; break; }
         swapSurface(f, c, () => { const x0 = c.x, y0 = c.y; c.surf = g.surf; c.id = g.id; c.s = endS; c.dep = 0; c.bx = c.by = 0; place(c); c.bx = x0 - c.x; c.by = y0 - c.y; });
         c.dir = dn; c.st = "move"; c.t = pickR(CRAWL.snailMove);
@@ -384,6 +412,7 @@ function climbTarget(f, c){
 function updShrimp(f, c, S, act, dt, hot){
   c.bx *= Math.exp(-dt / 1.0); c.by *= Math.exp(-dt / 1.0);
   decayRes(c, dt);
+  if (c.st !== "hop") turnMgr(c, dt); else c.trn = false;
   c.pk += ((c.st === "pick" ? 1 : 0) - c.pk) * Math.min(1, dt * 6);
   f.clawT = (f.clawT || 0) + dt * (0.4 + 0.6 * c.pk);
   if (c.st === "hop") {
@@ -395,13 +424,13 @@ function updShrimp(f, c, S, act, dt, hot){
     return;
   }
   if (c.pause > 0) { c.pause -= dt; place(c); return; }
-  c.t -= dt;
+  if (!(c.st === "walk" && c.trn)) c.t -= dt; // 向きを変える間は歩く時間を使わない
   if (c.st === "walk") {
-    f.phase += dt * 8 * act;
-    stepSurf(f, c, S.speed * U * act * CRAWL.shrimpWalkV, dt);
+    f.phase += dt * (c.trn ? 4 : 8) * act; // 向きを変える間は脚を踏み替えるだけ
+    if (!c.trn) stepSurf(f, c, S.speed * U * act * CRAWL.shrimpWalkV, dt);
     if (c.t <= 0) { c.st = "pick"; c.t = pickR(CRAWL.shrimpPick); }
   } else if (c.t <= 0) { // pick の終わり
-    if (Math.random() < CRAWL.shrimpHopP * (1 + hot * 2) && f.health > 0.2) {
+    if (Math.random() < CRAWL.shrimpHopP * (1 + hot * 2) && f.health > 0.2 && !c.trn) {
       // 近い候補(ほかの個体がいない所)を選んで、短く跳ねる
       let best = null, bd = 1e9;
       for (let i = 0; i < 6; i++) { const sp = freeSpot(f, () => randSpot("shrimp", hot)), d = Math.hypot(sp.x - c.x, sp.y - c.y); if (clearance(f, keyOf(sp), sp.x, sp.y) >= 1 && d < bd) { bd = d; best = sp; } }
@@ -409,7 +438,7 @@ function updShrimp(f, c, S, act, dt, hot){
         const L0 = SPECIES[f.sp].len * U * f.scale, p0 = surfacePose(c, L0, GROUND.shrimp, c.dir);
         c.hspot = best; c.hx0 = c.x; c.hy0 = c.y; c.hx1 = best.x; c.hy1 = best.y; c.hdur = clamp(bd / (110 * U), 0.5, 1.4); c.hp = 0; c.st = "hop";
         c.hm = best.x >= c.x ? 1 : -1;                 // 動く向き(左右)
-        c.hsx = p0[3];                                 // 体の向き(左右)は跳ぶ間も変えない(前向きなら頭から、逆向きなら尾をはじいて跳ぶ)
+        c.hsx = c.vs;                                  // 体の向き(左右)は跳ぶ間も変えない(前向きなら頭から、逆向きなら尾をはじいて跳ぶ)
         c.hrot0 = p0[2]; c.hrot1 = Math.atan2(best.ux, -best.uy); // 離陸の面と着地の面の傾き(体の上向きの角度)
         c.rx = c.ry = c.rr = 0;
         c.res = { key: keyOf(best), x: best.x, y: best.y, r: crawlerRadius(f) };
@@ -436,6 +465,7 @@ function otoGoal(tg, L0, face){
 function updOto(f, c, S, act, dt, hot){
   c.clk += dt;
   c.bx *= Math.exp(-dt / 1.0); c.by *= Math.exp(-dt / 1.0);
+  turnMgr(c, dt);
   if (c.st === "swim") {
     f.phase += dt * 10;
     const L0 = S.len * U * f.scale, tg = { ...c.swim }; place(tg);
@@ -444,7 +474,7 @@ function updOto(f, c, S, act, dt, hot){
     let dx = goal.x - x, dy = goal.y - y; const d = Math.hypot(dx, dy);
     c.t -= dt; c.sT += dt;
     // 速さは変えない。ほかの個体をよけて遅れたときだけ、時間切れの後で少しずつ速くする(瞬間移動はしない)
-    const v = S.speed * U * act * CRAWL.otoSwimV * (1 + Math.max(0, -c.t) * 0.5);
+    const v = S.speed * U * act * CRAWL.otoSwimV * (1 + Math.max(0, -c.t) * 0.5) * (c.trn ? 0.5 : 1); // 向きを変える間は進みを半分にして、弧を描く
     if (d <= Math.max(v * dt, 1e-3)) { // 最後の 1 歩で着く(これ以上の距離を飛ばない)
       c.swim.sx = c.ssx; attach(c, c.swim);
       if (!onGlass(c)) c.dir = c.ssx * (dotT(c) >= 0 ? 1 : -1); // 面の上でも、泳いできた向き(左右)のまま
@@ -519,6 +549,13 @@ function surfacePose(c, L, g, moveDir){
 }
 /* 描画の呼び出し(軽量モードのときは個体ごとのスプライト。通常の呼び出しは従来と同じ引数) */
 const dCreature = (f, L0, L, wag, x, y, rot, sx) => liteOn ? drawCreatureLite(f, L0, L, wag, x, y, rot, sx, 1) : drawCreature(f, L, wag, x, y, rot, sx, 1);
+/* U ターン中の描画:体の横方向(体の向き rot の x 軸)だけを w 倍に縮めて、call(sx) を呼ぶ(描画関数は変えず、外側の変換で表す) */
+function drawTurned(c, x, y, rot, call){
+  const [sg, w] = turnView(c); c.vw = sg * w;
+  if (w < 0.9999) { ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(w, 1); ctx.rotate(-rot); ctx.translate(-x, -y); }
+  call(sg);
+  if (w < 0.9999) ctx.restore();
+}
 const dTilt = (f, L0, x, y, sx, p) => liteOn ? drawSnailTiltLite(f, L0, x, y, sx, p) : drawSnailTilt(f, L0, x, y, sx, p);
 const dFront = (f, L0, L, x, y, rot) => liteOn ? drawSnailFrontLite(f, L0, L, x, y, rot, 1) : drawSnailFront(f, L, x, y, rot, 1);
 /* 跳んでいるエビの姿勢 [x, y, rot, wag](体の中心)。接地点は放物線(y = 4h·e(1−e))を動く。
@@ -537,23 +574,23 @@ function drawOne(f){
     if (c.tl > 0 && c.tl < 1) { // 縁で、横向き ⇔ 足の裏(降りてきた向き c.tr から、足の裏が下を向いたまま回って横向きへ。接地点を中心に回す)
       const x = c.surf === "gF" ? c.fx * W : c.x, y = c.surf === "gF" ? c.fy * H : c.y, r = c.tr * c.tl;
       if (r) { ctx.save(); ctx.translate(x, y); ctx.rotate(r); ctx.translate(-x, -y); }
-      dTilt(f, L0, x, y, c.dir >= 0 ? 1 : -1, c.tl);
+      c.vw = c.vs; dTilt(f, L0, x, y, c.vs, c.tl);
       if (r) ctx.restore();
       return;
     }
-    if (c.surf === "gF") { dFront(f, L0, L0 * 1.2, c.fx * W, c.fy * H, c.hdD); return; }
-    const [x, y, rot, sx] = surfacePose(c, L0, GROUND.snail, c.dir);
-    dCreature(f, L0, L0, 0, x + c.rx, y + c.ry, rot + c.rr, sx); return;
+    if (c.surf === "gF") { c.vw = null; dFront(f, L0, L0 * 1.2, c.fx * W, c.fy * H, c.hdD); return; }
+    const [x, y, rot] = surfacePose(c, L0, GROUND.snail, c.dir);
+    drawTurned(c, x + c.rx, y + c.ry, rot + c.rr, sg => dCreature(f, L0, L0, 0, x + c.rx, y + c.ry, rot + c.rr, sg)); return;
   }
   if (f.sp === "shrimp") {
-    if (c.st === "hop") { const [x, y, rot, wag] = hopPose(f, c, L0); dCreature(f, L0, L0, wag, x, y, rot, c.hsx); return; }
-    const [x, y, rot, sx] = surfacePose(c, L0, GROUND.shrimp, c.dir);
-    dCreature(f, L0, L0, Math.sin(f.phase * 3) * 0.06, x + c.rx, y + c.ry, rot + c.rr, sx); return;
+    if (c.st === "hop") { const [x, y, rot, wag] = hopPose(f, c, L0); c.vw = c.hsx; dCreature(f, L0, L0, wag, x, y, rot, c.hsx); return; }
+    const [x, y, rot] = surfacePose(c, L0, GROUND.shrimp, c.dir);
+    drawTurned(c, x + c.rx, y + c.ry, rot + c.rr, sg => dCreature(f, L0, L0, Math.sin(f.phase * 3) * 0.06, x + c.rx, y + c.ry, rot + c.rr, sg)); return;
   }
   // オト(泳ぎ中の姿勢は updOto が c.pose に入れる。奥のガラスは小さく(奥行きの淡さは、描画順で後から重なる霞の層が受け持つ。透明にはしない))
-  if (c.st === "swim") { const q = c.pose || otoPose(f, c); dCreature(f, L0, L0 * q.k, Math.sin(f.phase) * S.wag, q.x, q.y, q.rot, q.sx); return; }
+  if (c.st === "swim") { const q = c.pose || otoPose(f, c); drawTurned(c, q.x, q.y, q.rot, sg => dCreature(f, L0, L0 * q.k, Math.sin(f.phase) * S.wag, q.x, q.y, q.rot, sg)); return; }
   const q = otoPose(f, c);
-  dCreature(f, L0, L0 * q.k, Math.sin(c.clk * 38) * 0.05 * c.graze, q.x, q.y, q.rot, q.sx);
+  drawTurned(c, q.x, q.y, q.rot, sg => dCreature(f, L0, L0 * q.k, Math.sin(c.clk * 38) * 0.05 * c.graze, q.x, q.y, q.rot, sg));
 }
 /* layer:"back"(奥のガラスのオト)/ "low"(岩・砂・流木の上の 3 種)/ "front"(移動中のオト)/ "glass"(前面ガラスの貝とオト) */
 export function drawCrawlers(layer){
