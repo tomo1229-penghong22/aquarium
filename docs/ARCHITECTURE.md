@@ -20,7 +20,7 @@
 | `js/scene.js` | `buildScene`、`makeStatic`、水草・流木・岩・浮草の描画、時間経過の見た目(`buildAging`・`ensureAging`・`drawAgingGlass`・`drawAgingHard`)、なめた跡(`updateTrails`・`TRAIL`・`trailState`)、コリドラスの砂煙(`FX`・`spawnPuff`・`updatePuffs`・`drawPuffs`)、`getWood`(流木の点列の読み取り)、コースティクス・光の筋・水面(光の素材は `buildLight` で作り置き)、温度計、24時間計(`clockHourAngle`、`drawClock`、位置を返す `clockGeom`。オフのときはグレー表示)、酸素メーター(`o2NeedleAngle`、`drawO2Meter`、`meterGeom`、作り置きの `buildMeter`)、LED・色調補正・ガラス、エアストーン・泡・粒子 |
 | `js/popup.js` | 拡大ポップアップ(`P`、`startAct`、`updatePop`、`drawPop`、`openPop` / `closePop`) |
 | `js/ui.js` | パネル、全画面表示、`updatePanel`、時計ボタン(`layoutClockBtn`)・照明の自動化(`autoLightTick`)・メンテの案内(`showNoticeIfAny`)・水槽のリセット |
-| `js/perf.js` | `?perf` のときだけ有効な性能計測(`PERF`、`perfBegin` / `perfMark` / `perfEnd` / `perfFrame` / `perfReport`。表示に `governor.js` の状態 `trail on/fading/off` と 3 秒平均を出す)。`governor.js` にだけ依存する |
+| `js/perf.js` | `?perf` のときだけ有効な性能計測(`PERF`、`perfBegin` / `perfMark` / `perfEnd` / `perfFrame` / `perfReport`。表示に `governor.js` の状態 `trail on/fading/off`・3 秒平均・`lite on/off` を出す)と、層の無効化 `?perf&skip=`(`parsePerfParams`・`skipOn`・`dprCap`)、自動計測 `?perf&bench` / `?perf&bench=cum`(`benchConditions`・`cumConditions`・`cumSummary`・`perfBenchInit`)。`governor.js` にだけ依存する |
 | `js/main.js` | `draw`、`loop`、`resize`、開始処理。エントリポイント |
 
 ### import の向き
@@ -237,7 +237,7 @@ loop(毎フレーム)
 
 1. `npm test`:ブラウザなしで(不透明化の「監査」を含む:`AUDIT.hook` で体・ひれの区間を記録用のコンテキストに知らせ、体の塗りの `globalAlpha` が 1、ひれの膜だけ半透明、エビは共用の 1 枚から 1 回だけ貼ることを確かめる)実行時エラー・NaN・体調モデル・ポップアップの詰まり・餌を食べられるか・お掃除生体の動き(2 分間のシミュレーションを含む)・なめた跡と性能による切り替えを確かめる(所要 約 80 秒)。Canvas と DOM のモックをグローバルに置いてから `js/main.js` を import する方式で、内部状態には各モジュールの export 経由でアクセスする。
    - 見た目を変えない変更(分割・整理など)では、`npm run drawlog` も実行する。描画命令の列を `tests/baseline/` の基準ログと比べ、一致すれば描画結果は同一(所要 約 40〜50 秒)。基準の `drawlog.log.gz` はリポジトリ外で、ハッシュ `drawlog.sha256` だけを管理する。
-   - お掃除生体が入った現在の `npm run drawlog` は、基準ログ(新種なし)と一致しない(パネルに新種のアイコンが加わるため)。確認するときは、新種を ORDER から外し(`species.ORDER.length = 6`)、砂煙を切り(`scene.FX.puff = false`)、性能の測定を固定(`governor.GOV.override = 0`)したハーネスで比べる。基準の取り直しは、見た目を人間が了承した後に行う(`node tests/drawlog.mjs --record`)。
+   - 現在の `npm run drawlog` は、基準ログ(お掃除生体・軽量モードの導入後に取り直したもの)と一致する(軽量モードはオフが既定で、`liteOn=false` の描画命令は変えない)。ハーネスは性能の測定を固定している(`governor.GOV.override = 0`)。お掃除生体を持たない旧版との比較をするときだけ、新種を ORDER から外し(`species.ORDER.length = 6`)、砂煙を切る(`scene.FX.puff = false`)(CLAUDE.md の落とし穴のとおり)。基準の取り直しは、見た目を人間が了承した後に行う(`node tests/drawlog.mjs --record`)。
    - `drawlog` は 24時間計が現在時刻に依存するため、`TZ=UTC`・固定時刻 6:30(UTC)で実行する。実行環境のタイムゾーンや時刻に描画ログが左右されない。
    - 群れの形を確かめるときは `npm run school`。
 2. 不透明化の画素確認:`npm run serve` → `http://localhost:8000/tests/pixels.html` を実際のブラウザで開く。魚 6 種・オト・エビ・貝を赤と緑の背景に描き、体の画素が背景に影響されない(差 ≤ 2/255)、ひれの膜は背景が見える、エビは背景がうっすら見えて重なりで濃くならない、貝の殻・足は不透明、を判定して表示する(結果は `window.__pixels`)。背景の物体(岩・流木・水草・浮草の葉)も、内部の画素が背景に影響されないことを判定する(3 倍の解像度で描き、周囲 2 画素がすべて塗られた内部の画素のうち、別々の不透明な図形のあいだから背景が見える「すき間」を除いた「面状」の透けた画素が 0)。浮草の細い根(`rgba(225,215,185,0.55)` の線)は、ひれの膜と同じく物理的に透ける部分として許容し、その線を描かずに判定する。水槽全体(背景・水草・岩・流木・霞)と物体ごとの平均の明度・彩度も表示する(判定ではない。`?layout=old` を付けると、変更前の層の透明度と霞の値で描く。6599b24 のチェックアウトにこのファイルをコピーして `?layout=old` で開けば、変更前の見え方と比べられる)。`sw.js` の `PRECACHE` には入れない(テスト用。`npm test` の検出は `js/`・`icons/`・manifest・`index.html` だけを見るので `tests/` は対象外)。
@@ -246,3 +246,26 @@ loop(毎フレーム)
    - 各魚アイコンへのマウスオーバー(タッチ端末ではタップ)と、離したときに閉じること
    - 全画面の出入り(ボタン・F・ダブルクリック・Esc)、横長と縦長の画面
    - ダークモードでのパネルの見え方
+
+## 軽量モード(issue #6)
+
+`core.js` の `liteOn`(`setLite(v)`、保存キー `lite`)を、描画側が読んで分岐するだけ。`liteOn` が false のときの描画命令は変えない(`npm run drawlog` で確認する)。**描画順(上の `draw()`)と各層の位置は軽量モードでも変わらない**(作り置きを貼る位置が、元の描画の位置)。
+
+- **全面の作り置き**(`scene.js` の `liteLayer(name, { key, every, phase }, fn)`):`W·DPR × H·DPR` のオフスクリーンを `name` ごとに 1 枚持ち、毎フレームは `drawImage(c, 0, 0, W, H)`(1:1・`globalAlpha` 1)。描き直しは、初回・`every` 指定なら `every` 回に 1 回(`phase` は最初の位置のずらし)・`every` なしなら `key` が変わったとき。描き直すときだけ `setCtx` でオフスクリーンへ差し替えて `fn()` を呼ぶ(`try/finally` で戻す)。使うのは、`hard`(`drawHardLite()`。流木・岩・こけ・岩流木の苔。`key` = `round(algaeHard × 512)`)、`plantsBack` / `plantsMid` / `plantsFront`(`main.js`。`every` = 3、`phase` = 0 / 1 / 2)。
+- **泡**(`drawBubblesLite()`):大きさ 5 段階(`BUB_K` = 1.2・1.8・2.7・4・6 U)の小さな泡の画像(`bubbleSprites()` が初回に作る)から、半径の対数が最も近いものを拡縮して貼る。
+- **個体ごとのスプライト**(`fish-render.js` の `liteSprite(f, R, x, y, fn)`):個体 `f` ごとに、原点が中央の `2Rd` 四方(`Rd` は DPR 込みの半径画素)のオフスクリーンを `Map` に持つ。描き直しは初回と 3 フレームに 1 回(`LITE_EVERY`。個体の通し番号でずれる)。貼る位置は毎フレーム、device 画素に丸める(拡大縮小なし)。スプライトの中で `rotate` / `scale`(向き・傾き・反転)と `PAINT` を従来どおり呼ぶので、`BASE_A`・`BODY_A`・エビの 1 枚の半透明・フェードはそのまま成り立つ。`drawFishLite`(魚。足元の影はスプライトの外に毎フレーム描く)、`drawCreatureLite` / `drawSnailTiltLite` / `drawSnailFrontLite`(お掃除生体。`crawlers.js` の `dCreature` / `dTilt` / `dFront` が `liteOn` で振り分ける)。
+- **外接の半径** `R`:魚は体長 `L` × `FISH_R`(ネオン 1.1・ラミー 1.1・グッピー 1.7・プラティ 1.3・エンゼル 2.1・コリドラス 1.2)、お掃除生体は `max(L, 1.2·L0)` × `CREATURE_R`(1.2)。実測(制御点まで含む保守的な外接)の最大値に余白を付けた値で、さらにキャンバスに約 1.1 倍 + 2px の余白がある。`tests/smoke.mjs` が、種・向き・回転・尾の位相・速さ・体調・大きさを変えて「描画がキャンバスに収まる」ことを検査する。**描画関数(`PAINT` や水草・岩の描画)を変えたら、この検査を確認する。**
+- **作り直しと解放**:スプライトは、必要な半径が足りない・大きすぎる(必要の 1.4 倍 + 8 超)・DPR が変わったときだけ作り直す。個体が消えると `litePrune(fishes)` が捨てる。全面の作り置きとバブルの画像は `buildScene()`(resize)の最後の `liteRelease()` で捨て、必要になったとき作り直す。通常モードに戻ったら、`main.js` が `liteRelease()` と `liteSpritesRelease()` で全部捨てる(通常モードでは何も保持しない)。
+- **メモリの概算**:全面の作り置き 4 枚で約 `4 × W·DPR × H·DPR × 4B`(1140×713・DPR 1.25 で約 20MB)。スプライトは、既定の数(37 匹)で DPR 2 のとき約 5.8MB、全種最大数(135 匹)で約 21.7MB(DPR 1.25 では約 0.39 倍)。
+- **なめた跡**:`main.js` の `trailLevel()`(`liteOn` か `?perf&skip=trails` なら 0、それ以外は `trailStrength()`)を `updateTrails` に渡す。苔の状態は変えない。
+- **パス数の目安**(smoke の既定の数、1 フレーム、通常 → 軽量):岩・流木・こけ・苔 213 → 0、奥の水草 669 → 223、中景の草 444 → 148、前景の草 379 → 126、泡 455 → 2(+ `drawImage` 151)、奥の魚 362 → 124、手前の魚 187 → 62。
+- **不変条件**:`liteOn` が false のとき描画命令・乱数消費は変わらない。物体は不透明、貼り付けは `globalAlpha` 1。トップレベルで Canvas を作らない(必要になった最初の呼び出しで作る)。
+
+## 計測の口(`perf.js`。`?perf` のときだけ)
+
+- `?perf&skip=a,b,...`:指定した層の描画を飛ばす(計測専用)。層名は `draw()` の `perfMark` の名前(`static`・`rays`・`backPlants`・`haze`(3 か所の全面の霞をまとめて)・`bubbles`・`backFish`・`midground`・`frontFish`・`frontPlants`・`floats`・`motes`・`caustics`・`surface`・`agingGlass`・`grade`・`led`・`thermometer`・`clock`・`o2meter`・`glass`)と、特別な名前 `dpr1`(`resize` の DPR の上限を 1 に)・`shadow`(温度計の `shadowBlur` なし)・`trails`(なめた跡なし)・`gradeDay` / `gradeNight`(色調補正の昼・夜の側だけ)。`main.js` が各層の呼び出しを `skipOn(名前)` の `if` で包む(`?perf` なしでは常に false)。`shadow` / `gradeDay` / `gradeNight` は `scene.js` の `FX` のフラグで、通常は true。
+- `?perf&bench`:昼・夜それぞれで「基準 → 各層を 1 つずつ skip → 特別な名前 → static 以外すべて skip」を自動で切り替え、1 条件 = 捨て 1.5 秒 + 計測 10 秒(54 条件・約 10 分半)。`?perf&bench=cum`:層を `draw()` の順に積み上げ、昼夜それぞれ往路(static だけ → 全層)・復路(全層 → static だけ)を計測して往復平均を取り、層ごとの増分を出す(1 条件 = 捨て 1.5 秒 + 計測 6 秒・80 条件・約 10 分)。主指標はフレーム間隔の平均(中央値は 16.7ms 刻みに量子化されるため)。結果はオーバーレイの表・`window.__bench`(JSON)・`console.log("[bench] …")` に出す。
+- bench の間は、`freezeSave()`(`core.js`。以後 `save()` は何も書かない)で保存を凍結し、照明は `setNight` で切り替え(自動の照明切り替えは止める)、`GOV.override = 0` で性能による跡の自動 off を止める。bench 中は `liteOn` を切り替えない(開始時の値のまま計測する)。
+- フレーム間隔が 500ms を超える(背面のタブなどで `requestAnimationFrame` が止まった)間隔は、通常の `?perf` の統計に入れない。bench では、500ms 超または hidden になったら、その条件の計測を捨てて捨て時間からやり直し、回数を `retries` に記録する。
+- 通常の `?perf` の表示は、各行に avg・med(中央値)・p95 を出す。
+- `?perf` なしでは、描画命令・乱数消費・保存・DOM は一切変わらない。
