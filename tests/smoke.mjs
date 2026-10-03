@@ -779,6 +779,157 @@ for (const [sp, acts] of Object.entries(ACTS_NEW)) {
     const ok = Object.values(rows).every(([a, b]) => b.p < a.p);
     check("軽量モード(L2):1 フレームのパス(fill+stroke)は、どの層でも通常より少ない(参考値)", ok, Object.entries(rows).map(([k, [a, b]]) => `${k} ${a.p.toFixed(1)}→${b.p.toFixed(1)}(drawImage ${a.d.toFixed(1)}→${b.d.toFixed(1)})`).join(" / "));
   }
+  // 軽量モード(L2c):個体ごとのスプライト。外接の検査(描画の点・ひれ・尾・触角・揺れの余白込みがキャンバスに収まる)
+  {
+    const fr = await imp("fish-render.js");
+    // 外接を数える記録用の ctx(変換行列を追い、パス・矩形・drawImage の四隅をスプライト内の画素座標で記録する)
+    class RecPath {
+      constructor() { this.pts = []; }
+      moveTo(x, y) { this.pts.push([x, y]); } lineTo(x, y) { this.pts.push([x, y]); }
+      quadraticCurveTo(a, b, x, y) { this.pts.push([a, b], [x, y]); } bezierCurveTo(a, b, c, d, x, y) { this.pts.push([a, b], [c, d], [x, y]); }
+      arc(x, y, r) { this.pts.push([x - r, y - r], [x + r, y + r], [x - r, y + r], [x + r, y - r]); }
+      ellipse(x, y, rx, ry) { const r = Math.max(rx, ry); this.pts.push([x - r, y - r], [x + r, y + r], [x - r, y + r], [x + r, y - r]); }
+      rect(x, y, w, h) { this.pts.push([x, y], [x + w, y + h]); } closePath() {} addPath(p) { this.pts.push(...p.pts); }
+    }
+    const mkTracker = () => {
+      let m = [1, 0, 0, 1, 0, 0]; const stack = [], st = { lineWidth: 1 };
+      let cur = []; const ext = { x0: 1e9, x1: -1e9, y0: 1e9, y1: -1e9 };
+      const mul = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
+      const tp = ([x, y]) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+      const rec = (pts, pad = 0) => { for (const q of pts) { const [x, y] = tp(q), sc = Math.hypot(m[0], m[1]); ext.x0 = Math.min(ext.x0, x - pad * sc); ext.x1 = Math.max(ext.x1, x + pad * sc); ext.y0 = Math.min(ext.y0, y - pad * sc); ext.y1 = Math.max(ext.y1, y + pad * sc); } };
+      const o = {
+        ext, resetExt() { ext.x0 = 1e9; ext.x1 = -1e9; ext.y0 = 1e9; ext.y1 = -1e9; },
+        save() { stack.push([m.slice(), st.lineWidth]); }, restore() { const t = stack.pop(); if (t) { m = t[0]; st.lineWidth = t[1]; } },
+        translate(x, y) { m = mul(m, [1, 0, 0, 1, x, y]); }, rotate(a) { const c = Math.cos(a), s2 = Math.sin(a); m = mul(m, [c, s2, -s2, c, 0, 0]); },
+        scale(x, y) { m = mul(m, [x, 0, 0, y, 0, 0]); }, transform(a, b, c, d, e, f) { m = mul(m, [a, b, c, d, e, f]); },
+        setTransform(a, b, c, d, e, f) { m = [a, b, c, d, e, f]; }, getTransform() { return { a: m[0], b: m[1], c: m[2], d: m[3], e: m[4], f: m[5] }; },
+        beginPath() { cur = []; }, closePath() {},
+        moveTo(x, y) { cur.push([x, y]); }, lineTo(x, y) { cur.push([x, y]); },
+        quadraticCurveTo(a, b, x, y) { cur.push([a, b], [x, y]); }, bezierCurveTo(a, b, c, d, x, y) { cur.push([a, b], [c, d], [x, y]); },
+        arc(x, y, r) { cur.push([x - r, y - r], [x + r, y + r], [x - r, y + r], [x + r, y - r]); }, ellipse(x, y, rx, ry) { const r = Math.max(rx, ry); cur.push([x - r, y - r], [x + r, y + r], [x - r, y + r], [x + r, y - r]); },
+        rect(x, y, w, h) { cur.push([x, y], [x + w, y + h]); },
+        fill(path) { rec(path && path.pts ? path.pts : cur); }, stroke(path) { rec(path && path.pts ? path.pts : cur, st.lineWidth / 2); }, clip() {},
+        fillRect(x, y, w, h) { rec([[x, y], [x + w, y], [x, y + h], [x + w, y + h]]); },
+        drawImage(img, ...a) { const [dx, dy, dw, dh] = a.length === 8 ? a.slice(4) : a.length === 4 ? a : [a[0], a[1], img.width, img.height]; rec([[dx, dy], [dx + dw, dy], [dx, dy + dh], [dx + dw, dy + dh]]); },
+        clearRect() {}, createLinearGradient: () => ({ addColorStop() {} }), createRadialGradient: () => ({ addColorStop() {} }), createConicGradient: () => ({ addColorStop() {} }),
+        createImageData: (w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(4) }),
+      };
+      return new Proxy(o, { get(t, k) { if (k === "lineWidth") return st.lineWidth; return k in t ? t[k] : () => {}; }, set(t, k, v) { if (k === "lineWidth") st.lineWidth = v; else t[k] = v; return true; } });
+    };
+    const origCE = document.createElement, origP2D = globalThis.Path2D;
+    document.createElement = tag => { const e = origCE(tag); if (tag === "canvas") { const tr = mkTracker(); e.getContext = () => tr; } return e; };
+    globalThis.Path2D = RecPath;
+    let errX = null;
+    const fitFail = [], ratio = {};
+    // 直近にスプライトへ描かれた範囲が、キャンバス(2Rd 四方)に収まるか。ratio:原点からの最大距離 / 基準の長さ
+    const checkFit = (key, f, L) => {
+      const si = fr.liteSpriteOf(f); if (!si) return; const e = si.g.ext, Rd = si.Rd;
+      if (e.x1 < e.x0) return;
+      const m = Math.max(-(e.x0 - Rd), e.x1 - Rd, -(e.y0 - Rd), e.y1 - Rd) / si.dpr;
+      ratio[key] = Math.max(ratio[key] || 0, m / L);
+      if (e.x0 < 0 || e.y0 < 0 || e.x1 > 2 * Rd || e.y1 > 2 * Rd) fitFail.push(`${key} (${e.x0.toFixed(1)},${e.y0.toFixed(1)})-(${e.x1.toFixed(1)},${e.y1.toFixed(1)}) / ${2 * Rd}`);
+      si.g.resetExt();
+    };
+    try {
+      fr.liteSpritesRelease();
+      const nonSolo = A.ORDER.filter(k => !A.SPECIES[k].solo);
+      const saveC = Object.fromEntries(A.ORDER.map(k => [k, A.counts[k]]));
+      for (const k of A.ORDER) A.counts[k] = Math.max(1, Math.min(6, A.SPECIES[k].max)); A.syncFish(); frames(5);
+      // 魚:種 × 向き・傾き・位相(尾の振り)・速さ・奥行き・体調
+      for (const sp of nonSolo) {
+       for (const f of A.fishes.filter(q => q.sp === sp)) {   // 個体ごと(色の変種・大きさの個体差を含める)
+        const keep = { flip: f.flip, pitch: f.pitch, tilt: f.tilt, phase: f.phase, speedNow: f.speedNow, z: f.z, health: f.health, x: f.x, y: f.y };
+        for (const flip of [1, -0.4]) for (const pt of [-0.8, 0.8]) for (const z of [0, 1]) for (let ph = 0; ph < 6.3; ph += 1.3) for (const spd of [0, 1e4]) for (const hp of [1, 0.2]) {
+          Object.assign(f, { flip, pitch: pt, tilt: 0, phase: ph, speedNow: spd, z, health: hp, x: core.W * 0.5, y: core.H * 0.4 });
+          const L = A.SPECIES[sp].len * core.U * f.scale * (0.72 + 0.38 * z);
+          fr.liteSpritesRelease(); // 毎回作り直す(前の姿勢の大きめのキャンバスが残って検査が甘くならないように)
+          for (let i = 0; i < 3; i++) fr.drawFishLite(f);
+          checkFit(sp, f, L);
+        }
+        Object.assign(f, keep);
+       }
+      }
+      // お掃除生体:種 × 向き・回転・波打ち・大きさ(奥のガラスは 0.8、前面は 1.1、貝の前面は 1.2 倍)
+      for (const sp of ["oto", "shrimp", "snail"]) {
+       for (const f of A.fishes.filter(q => q.sp === sp)) {
+        const L0 = A.SPECIES[sp].len * core.U * f.scale;
+        const keep = { phase: f.phase, pale: f.pale, hide: f.hide };
+        for (const sx of [1, -1]) for (let rot = -Math.PI; rot <= Math.PI; rot += 0.7) for (const k of [0.8, 1, 1.1, 1.2]) for (const wag of [-0.5, 0, 0.5]) for (let ph = 0; ph < 6.3; ph += 1.6) for (const hide of [0, 1]) {
+          f.phase = ph; f.hide = hide; f.pale = 0.5;
+          fr.liteSpritesRelease();
+          for (let i = 0; i < 3; i++) fr.drawCreatureLite(f, L0, L0 * k, wag, 400, 300, rot, sx, 1);
+          checkFit(sp + "(横)", f, L0);
+        }
+        if (sp === "snail") {
+          for (const sx of [1, -1]) for (const p of [0.05, 0.3, 0.5, 0.7, 0.95]) { fr.liteSpritesRelease(); for (let i = 0; i < 3; i++) fr.drawSnailTiltLite(f, L0, 400, 300, sx, p); checkFit("貝の縁", f, L0); }
+          for (let rot = -Math.PI; rot <= Math.PI; rot += 0.5) { fr.liteSpritesRelease(); for (let i = 0; i < 3; i++) fr.drawSnailFrontLite(f, L0, L0 * 1.2, 400, 300, rot, 1); checkFit("貝の前面", f, L0); }
+        }
+        Object.assign(f, keep);
+       }
+      }
+      for (const k of A.ORDER) A.counts[k] = saveC[k]; A.syncFish();
+    } catch (e) { errX = e; }
+    document.createElement = origCE; globalThis.Path2D = origP2D; fr.liteSpritesRelease();
+    check("軽量モード(L2c):スプライトが個体の描画を切らない(魚 6 種・お掃除生体 3 種を、向き・回転・尾の振り・速さ・体調・大きさを変えて外接を検査)", !errX && fitFail.length === 0,
+      errX ? String(errX.stack || errX) : (fitFail.length ? fitFail.slice(0, 6).join(" | ") + " || " : "") + "原点からの最大距離/基準の長さ:" + Object.entries(ratio).map(([k, v]) => `${k} ${v.toFixed(2)}`).join(" "));
+  }
+
+  // 軽量モード(L2c):600 フレーム(既定の数・全種最大数)で例外なし・個体ごとの描き直しがおよそ 1/3・増減/resize/行き来で例外なし・解放
+  {
+    const fr = await imp("fish-render.js");
+    const saveC = Object.fromEntries(A.ORDER.map(k => [k, A.counts[k]]));
+    const setAll = f => { for (const k of A.ORDER) A.counts[k] = f(k); A.syncFish(); };
+    if (!core.liteOn) clickLite();
+    const perFish = () => A.fishes.map(f => fr.liteSpriteOf(f)).filter(Boolean);
+    const runCase = (label, f) => {
+      setAll(f); fr.liteSpritesRelease(); let err = null;
+      try { frames(600); } catch (e) { err = e; }
+      const st = fr.liteSpriteStats(), per = perFish();
+      const okCount = per.length === A.fishes.length;
+      const okRatio = per.every(s => s.calls >= 590 && s.redraws >= s.calls / 3 - 1 && s.redraws <= s.calls / 3 + 12);
+      // 描き直しの山が平らか:1 フレームあたりの描き直し数の最大が N/3 + 3 以下
+      let mx = 0; for (let i = 0; i < 12; i++) { const b = fr.liteSpriteStats().redraws; frames(1); mx = Math.max(mx, fr.liteSpriteStats().redraws - b); }
+      const okFlat = mx <= Math.ceil(A.fishes.length / 3) + 3;
+      check(`軽量モード(L2c):${label}(${A.fishes.length} 匹)で 600 フレーム例外なし・全個体にスプライト・描き直しが約 1/3・1 フレームの描き直しは約 N/3`,
+        !err && okCount && okRatio && okFlat && finite(),
+        err ? String(err.stack || err) : `スプライト ${st.count} / 描き直し 平均 ${(per.reduce((a, s) => a + s.redraws, 0) / Math.max(1, per.length)).toFixed(0)}/${(per.reduce((a, s) => a + s.calls, 0) / Math.max(1, per.length)).toFixed(0)} / 1 フレーム最大 ${mx} / メモリ ${(st.bytes / 1048576).toFixed(1)}MB(DPR ${core.DPR})`);
+    };
+    runCase("既定の数", k => A.SPECIES[k].def);
+    runCase("全種最大数", k => A.SPECIES[k].max);
+    // 個体の増減:減らすと、いなくなった個体のスプライトが捨てられる
+    setAll(k => Math.min(1, A.SPECIES[k].max)); frames(3);
+    check("軽量モード(L2c):個体を減らすと、いなくなった個体のスプライトが捨てられる", fr.liteSpriteStats().count === A.fishes.length, `スプライト ${fr.liteSpriteStats().count} / 個体 ${A.fishes.length}`);
+    setAll(k => A.SPECIES[k].max); frames(3);
+    check("軽量モード(L2c):個体を増やすと、新しい個体にスプライトができる", fr.liteSpriteStats().count === A.fishes.length, `スプライト ${fr.liteSpriteStats().count} / 個体 ${A.fishes.length}`);
+    // resize(全画面の切り替え)と、軽量・通常の行き来
+    let errR = null;
+    try { for (let i = 0; i < 3; i++) { A.setPseudo(true); frames(4); A.setPseudo(false); frames(4); } for (let i = 0; i < 6; i++) { clickLite(); frames(5); } } catch (e) { errR = e; }
+    check("軽量モード(L2c):resize(全画面の出入り)と軽量・通常の行き来で例外なし", !errR && core.liteOn === true && finite(), errR ? String(errR.stack || errR) : "");
+    clickLite(); frames(2);
+    check("軽量モード(L2c):通常モードに戻るとスプライトがすべて捨てられる", core.liteOn === false && fr.liteSpriteStats().count === 0, `スプライト ${fr.liteSpriteStats().count}`);
+    setAll(k => saveC[k]); frames(10);
+    // 1 フレームあたりのパス(fill+stroke)を層ごとに通常と並べる(参考値)
+    {
+      const KEYS = ["fill", "stroke", "drawImage"], n = { fill: 0, stroke: 0, drawImage: 0 }, origCE = document.createElement, cx = core.ctx;
+      const inst = g => { for (const k of KEYS) g[k] = () => { n[k]++; }; return g; };
+      document.createElement = tag => { const e = origCE(tag); if (tag === "canvas") { const gc = e.getContext; e.getContext = (...a) => inst(gc.apply(e, a)); } return e; };
+      inst(cx);
+      const per = (fn, N = 30) => { fr.liteSpritesRelease(); fn(); for (const k of KEYS) n[k] = 0; for (let i = 0; i < N; i++) fn(); return { p: (n.fill + n.stroke) / N, d: n.drawImage / N }; };
+      const sorted = A.fishes.filter(f => !A.SPECIES[f.sp].solo).sort((a, b) => a.z - b.z);
+      const rows = {};
+      core.setLite(false); const nm = { fb: per(() => sorted.forEach(f => { if (f.z < 0.45) fr.drawFish(f); })), ff: per(() => sorted.forEach(f => { if (f.z >= 0.45) fr.drawFish(f); })) };
+      for (const l of ["back", "low", "front", "glass"]) nm[l] = per(() => crw.drawCrawlers(l));
+      core.setLite(true); const lt = { fb: per(() => sorted.forEach(f => { if (f.z < 0.45) fr.drawFishLite(f); })), ff: per(() => sorted.forEach(f => { if (f.z >= 0.45) fr.drawFishLite(f); })) };
+      for (const l of ["back", "low", "front", "glass"]) lt[l] = per(() => crw.drawCrawlers(l));
+      core.setLite(false);
+      document.createElement = origCE; for (const k of KEYS) delete cx[k]; fr.liteSpritesRelease();
+      const names = { fb: "奥の魚", ff: "手前の魚", back: "這う生体(奥のガラス)", low: "這う生体(岩・砂・流木)", front: "這う生体(移動中)", glass: "這う生体(前面ガラス)" };
+      const ok = Object.keys(names).every(k => lt[k].p <= nm[k].p);
+      check("軽量モード(L2c):1 フレームのパス(fill+stroke)は、どの層でも通常以下(参考値)", ok, Object.entries(names).map(([k, nmx]) => `${nmx} ${nm[k].p.toFixed(0)}→${lt[k].p.toFixed(0)}(drawImage ${nm[k].d.toFixed(1)}→${lt[k].d.toFixed(1)})`).join(" / "));
+    }
+    if (!core.liteOn) clickLite(); // 以降の「オフへ戻す」の前の状態(オン)にそろえる
+  }
+
   clickLite(); frames(2); // オフへ戻す(以降のテストは通常モード)
   ag.setAgingOn(true);
   frames(60);

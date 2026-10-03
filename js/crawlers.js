@@ -4,11 +4,11 @@
 // 位置は「面の種類 + 面の番号 + 位置(s)」で持つので、resize(情景の作り直し)後も relayout() だけで追従する。
 // 物理:瞬間移動しない(貝は砂の手前の縁まで這ってガラスを這い上がる。エビは放物線で跳ぶ。オトは泳ぐ)/同じ面の個体どうしは重ならない(近づいたら向きを変える・待つ・脇へよける)。
 // 依存の向き:scene・fish-render・fish-behavior の後(main.js から呼ばれる)。トップレベルで乱数・Canvas・Date を使わない。
-import { H, TAU, Tw, U, W, clamp, lerp, sandY, waterTop } from "./core.js";
+import { H, TAU, Tw, U, W, clamp, lerp, liteOn, sandY, waterTop } from "./core.js";
 import { SPECIES } from "./species.js";
 import { DO, hypoxia } from "./aging.js";
 import { getWood, rocks } from "./scene.js";
-import { GROUND, drawCreature, drawSnailFront, drawSnailTilt } from "./fish-render.js";
+import { GROUND, drawCreature, drawCreatureLite, drawSnailFront, drawSnailFrontLite, drawSnailTilt, drawSnailTiltLite } from "./fish-render.js";
 import { activity, fishes } from "./fish-behavior.js";
 
 /* ---------------- 主な数値 ---------------- */
@@ -457,28 +457,32 @@ function surfacePose(c, L, g, moveDir){
   const sx = (dot >= 0 ? 1 : -1) * moveDir;
   return [c.x + c.ux * g * L, c.y + c.uy * g * L, Math.atan2(c.ux, -c.uy), sx];
 }
+/* 描画の呼び出し(軽量モードのときは個体ごとのスプライト。通常の呼び出しは従来と同じ引数) */
+const dCreature = (f, L0, L, wag, x, y, rot, sx) => liteOn ? drawCreatureLite(f, L0, L, wag, x, y, rot, sx, 1) : drawCreature(f, L, wag, x, y, rot, sx, 1);
+const dTilt = (f, L0, x, y, sx, p) => liteOn ? drawSnailTiltLite(f, L0, x, y, sx, p) : drawSnailTilt(f, L0, x, y, sx, p);
+const dFront = (f, L0, L, x, y, rot) => liteOn ? drawSnailFrontLite(f, L0, L, x, y, rot, 1) : drawSnailFront(f, L, x, y, rot, 1);
 function drawOne(f){
   const S = SPECIES[f.sp], c = f.cr, L0 = S.len * U * f.scale;
   if (f.sp === "snail") {
-    if (c.tl > 0 && c.tl < 1) { drawSnailTilt(f, L0, c.surf === "gF" ? c.fx * W : c.x, c.surf === "gF" ? c.fy * H : c.y, c.dir >= 0 ? 1 : -1, c.tl); return; } // 縁で、横向き ⇔ 足の裏
-    if (c.surf === "gF") { drawSnailFront(f, L0 * 1.2, c.fx * W, c.fy * H, c.hdD, 1); return; }
+    if (c.tl > 0 && c.tl < 1) { dTilt(f, L0, c.surf === "gF" ? c.fx * W : c.x, c.surf === "gF" ? c.fy * H : c.y, c.dir >= 0 ? 1 : -1, c.tl); return; } // 縁で、横向き ⇔ 足の裏
+    if (c.surf === "gF") { dFront(f, L0, L0 * 1.2, c.fx * W, c.fy * H, c.hdD); return; }
     const [x, y, rot, sx] = surfacePose(c, L0, GROUND.snail, c.dir);
-    drawCreature(f, L0, 0, x, y, rot, sx, 1); return;
+    dCreature(f, L0, L0, 0, x, y, rot, sx); return;
   }
   if (f.sp === "shrimp") {
-    if (c.st === "hop") { const e = clamp(c.hp, 0, 1); drawCreature(f, L0, Math.sin(f.phase) * 0.5, c.x, c.y - GROUND.shrimp * L0, c.hsx * 0.7 * (2 * e - 1), c.hsx, 1); return; }
+    if (c.st === "hop") { const e = clamp(c.hp, 0, 1); dCreature(f, L0, L0, Math.sin(f.phase) * 0.5, c.x, c.y - GROUND.shrimp * L0, c.hsx * 0.7 * (2 * e - 1), c.hsx); return; }
     const [x, y, rot, sx] = surfacePose(c, L0, GROUND.shrimp, c.dir);
-    drawCreature(f, L0, Math.sin(f.phase * 3) * 0.06, x, y, rot, sx, 1); return;
+    dCreature(f, L0, L0, Math.sin(f.phase * 3) * 0.06, x, y, rot, sx); return;
   }
   // オト
   const jit = Math.sin(c.clk * 38) * 0.5 * U * c.graze, wag = Math.sin(c.clk * 38) * 0.05 * c.graze;
-  if (c.st === "swim") { drawCreature(f, L0, Math.sin(f.phase) * S.wag, c.fx * W, c.fy * H, c.ssx * c.sa, c.ssx, 1); return; }
+  if (c.st === "swim") { dCreature(f, L0, L0, Math.sin(f.phase) * S.wag, c.fx * W, c.fy * H, c.ssx * c.sa, c.ssx); return; }
   if (onGlass(c)) {
     const k = c.surf === "gB" ? 0.8 : 1.1; // 奥のガラスは小さく(奥行きの淡さは、描画順で後から重なる霞の層が受け持つ。透明にはしない)
-    drawCreature(f, L0 * k, wag, c.fx * W + Math.cos(c.ang) * jit, c.fy * H + Math.sin(c.ang) * jit, c.ang, c.sx, 1); return;
+    dCreature(f, L0, L0 * k, wag, c.fx * W + Math.cos(c.ang) * jit, c.fy * H + Math.sin(c.ang) * jit, c.ang, c.sx); return;
   }
   const [x, y, rot, sx] = surfacePose(c, L0, GROUND.oto, 1);
-  drawCreature(f, L0, wag, x + c.tx * jit, y + c.ty * jit, rot, sx, 1);
+  dCreature(f, L0, L0, wag, x + c.tx * jit, y + c.ty * jit, rot, sx);
 }
 /* layer:"back"(奥のガラスのオト)/ "low"(岩・砂・流木の上の 3 種)/ "front"(移動中のオト)/ "glass"(前面ガラスの貝とオト) */
 export function drawCrawlers(layer){

@@ -3,7 +3,7 @@
 import { DPR, counts, H, freezeSave, liteOn, save, Tset, Tw, W, clamp, ctx, cv, nightOn, nightT, setDPR, setH, setNightT, setTw, setU, setW, setWaterTop, tankEl, timeScale, waterTop } from "./core.js";
 import { ORDER, SPECIES } from "./species.js";
 import { applyAgingParam, checkMaintenance, fishLoadOf, initAging, onVisibility, updateAging } from "./aging.js";
-import { drawFish } from "./fish-render.js";
+import { drawFish, drawFishLite, litePrune, liteSpritesRelease } from "./fish-render.js";
 import { drawCrawlers, grazers, relayout, updateCrawler } from "./crawlers.js";
 import { govGrace, govTick, trailStrength } from "./governor.js";
 import { fishes, schools, syncFish, updateFish, updateHealth, updateSchools } from "./fish-behavior.js";
@@ -27,7 +27,9 @@ function draw(){
   if (PERF) perfMark("static");
   if (!skipOn("rays")) drawRays(T);
   if (PERF) perfMark("rays");
-  if (!liteOn && liteActive()) liteRelease(); // 通常モードに戻ったら作り置きを捨てる
+  if (!liteOn) { if (liteActive()) liteRelease(); liteSpritesRelease(); } // 通常モードに戻ったら作り置きを捨てる
+  const fishDraw = liteOn ? drawFishLite : drawFish; // 軽量モード:魚と這う生体は個体ごとのスプライト(姿勢は 3 フレームに 1 回、位置は毎フレーム)
+  if (liteOn) litePrune(fishes);
   // 軽量モード(L2):水草は層ごとの作り置きを 3 フレームに 1 回だけ描き直して貼る(層ごとに描き直すフレームをずらす)
   const LITE_EVERY = 3;
   if (!skipOn("backPlants")) { const f = () => plants.back.forEach(p => p.type === "ribbon" ? drawRibbon(p, T) : drawStem(p, T)); liteOn ? liteLayer("plantsBack", { every: LITE_EVERY, phase: 0 }, f) : f(); }
@@ -40,7 +42,7 @@ function draw(){
   if (PERF) perfMark("bubbles");
   const sorted = fishes.filter(f => !SPECIES[f.sp].solo).sort((a, b) => a.z - b.z);
   if (!skipOn("backFish")) {
-    sorted.forEach(f => { if (f.z < 0.45) drawFish(f); });
+    sorted.forEach(f => { if (f.z < 0.45) fishDraw(f); });
     drawCrawlers("back"); // 奥のガラスに吸いついたオト
   }
   if (PERF) perfMark("backFish");
@@ -60,7 +62,7 @@ function draw(){
   if (PERF) perfMark("midground");
   if (hazeOn) { ctx.fillStyle = nightT > 0.5 ? "rgba(70,120,140,0.07)" : "rgba(130,200,190,0.07)"; ctx.fillRect(0, waterTop, W, H * 0.82 - waterTop); } // 中景の草・岩・流木の淡さ(手前の魚の後ろ)
   if (!skipOn("frontFish")) {
-    sorted.forEach(f => { if (f.z >= 0.45) drawFish(f); });
+    sorted.forEach(f => { if (f.z >= 0.45) fishDraw(f); });
     drawCrawlers("front"); // 移動中のオト
     drawPuffs();           // コリドラスの砂煙
   }

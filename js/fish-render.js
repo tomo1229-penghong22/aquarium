@@ -1,5 +1,5 @@
 // 魚の描画。描画関数は、core.js が export する ctx と U を素の名前で使う。
-import { TAU, U, bottomY, clamp, ctx, lerp, nightT, setCtx } from "./core.js";
+import { DPR, TAU, U, bottomY, clamp, ctx, lerp, nightT, setCtx } from "./core.js";
 import { GUPPY_COL, PLATY_COL, SPECIES } from "./species.js";
 
 /* ---------------- 描画ヘルパ ---------------- */
@@ -437,3 +437,81 @@ export function drawFish(f){
 export function setEye(v){ EYE = v; }
 export function setBaseA(v){ BASE_A = v; }
 export function setBodyA(v){ BODY_A = v; }
+
+/* ---------------- 軽量モード:個体ごとのスプライト(main.js・crawlers.js が liteOn のときだけ使う) ----------------
+   魚・這う生体の 1 匹を、小さなオフスクリーン(個体の原点が中央)に描いて貼る。
+   姿勢(向き・回転・体のくねり・尾・ひれ・色・フェード)の描き直しは 3 フレームに 1 回(個体ごとに通し番号でずらす)。
+   位置は毎フレーム(貼る位置だけ動かす。拡大縮小なし、貼る位置は画素に丸める)。貼るときの globalAlpha は 1。
+   透明度(ひれの膜・エビの 1 枚の半透明・フェード)は、描画関数がスプライトの中でそのまま描く。
+   スプライトは resize(U・DPR の変化)・個体の消滅・軽量オフで捨てる。大きさは半径 R(原点から描画の端までの距離の上限)で決める。 */
+const SPR = new Map();      // 個体 f → { c, g, Rd, dpr, u, n, fresh, redraws, calls }
+let sprSeq = 0;
+export const LITE_EVERY = 3;
+/* 描画の外接半径(長さの単位)。魚は体長 L に対する倍率、お掃除生体は基準の長さ L0 に対する倍率。tests/smoke.mjs の外接の検査が上限を確かめる */
+export const FISH_R = { neon: 1.1, rummy: 1.1, guppy: 1.7, platy: 1.3, angel: 2.1, cory: 1.2 }; // 実測(制御点まで含む保守的な外接)の最大値に余白をつけた値
+export const CREATURE_R = 1.2;                // 実測の最大 1.30(エビ、L0 の 1.2 倍の大きさのとき)に対し、max(L, 1.2·L0) × 1.2 を半径にする
+export function liteSpritesRelease(){ SPR.clear(); }
+export function litePrune(list){ if (SPR.size > list.length) { const keep = new Set(list); for (const f of [...SPR.keys()]) if (!keep.has(f)) SPR.delete(f); } }
+export function liteSpriteStats(){
+  let bytes = 0, redraws = 0, calls = 0;
+  for (const s of SPR.values()) { bytes += 4 * (2 * s.Rd) ** 2; redraws += s.redraws; calls += s.calls; }
+  return { count: SPR.size, bytes, redraws, calls };
+}
+export function liteSpriteOf(f){ const s = SPR.get(f); return s ? { Rd: s.Rd, dpr: s.dpr, redraws: s.redraws, calls: s.calls, g: s.g } : null; }
+/* R:外接半径(css 長さ)。x, y:原点の位置。fn:原点(0,0)を中心に描く関数(ctx はスプライトへ差し替わる。素の ctx と U だけを使う) */
+function liteSprite(f, R, x, y, fn){
+  const need = Math.max(2, Math.ceil(R * DPR));
+  let s = SPR.get(f);
+  if (!s || s.dpr !== DPR || s.Rd < need || s.Rd > need * 1.4 + 8) {   // 足りない・大きすぎる・DPR が変わったときだけ作り直す
+    const c = document.createElement("canvas"), Rd = Math.ceil(need * 1.1) + 2;
+    c.width = c.height = 2 * Rd;
+    s = { c, g: c.getContext("2d"), Rd, dpr: DPR, n: s ? s.n : sprSeq++, fresh: true, redraws: s ? s.redraws : 0, calls: s ? s.calls : 0 };
+    SPR.set(f, s);
+  }
+  s.calls++;
+  const due = s.fresh || s.n % LITE_EVERY === 0;
+  s.n++;
+  if (due) {
+    const orig = ctx, g = s.g;
+    s.fresh = false; s.redraws++;
+    setCtx(g);
+    try {
+      g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, s.c.width, s.c.height);
+      g.setTransform(DPR, 0, 0, DPR, s.Rd, s.Rd); g.globalAlpha = 1;
+      fn();
+    } finally { setCtx(orig); BASE_A = 1; BODY_A = 1; }
+  }
+  ctx.drawImage(s.c, (Math.round(x * DPR) - s.Rd) / DPR, (Math.round(y * DPR) - s.Rd) / DPR, 2 * s.Rd / DPR, 2 * s.Rd / DPR);
+}
+/* drawFish の軽量版。足元の影は位置で決まるので、スプライトの外に毎フレーム描く(パス 1 つ) */
+export function drawFishLite(f){
+  const S = SPECIES[f.sp];
+  const L = S.len * U * f.scale * (0.72 + 0.38 * f.z);
+  const fy = bottomY(f.x, f.z), gap = fy - f.y;
+  if (gap < 110 * U) {
+    ctx.fillStyle = `rgba(20,50,45,${0.16 * (1 - gap / (110 * U))})`;
+    ctx.beginPath(); ctx.ellipse(f.x, fy - 3 * U, L * 0.5, L * 0.09, 0, 0, TAU); ctx.fill();
+  }
+  liteSprite(f, L * FISH_R[f.sp], f.x, f.y, () => {
+    const wag = Math.sin(f.phase) * S.wag * (0.45 + 0.55 * Math.min(1, (f.speedNow || 0) / (S.speed * U)));
+    const dir = f.flip >= 0 ? 1 : -1;
+    ctx.rotate((f.pitch + f.tilt) * dir);
+    ctx.scale(dir * Math.max(0.1, Math.abs(f.flip)), 1);
+    BASE_A = S.finAlpha; BODY_A = 1; ctx.globalAlpha = BODY_A;
+    PAINT[f.sp](L, wag, f);
+  });
+}
+/* お掃除生体(drawCreature / drawSnailTilt / drawSnailFront)の軽量版。L0:その個体の基準の長さ(外接の見積もりに使う。貝の前面の姿は 1.2 倍で描かれるのでここで見込む) */
+export function drawCreatureLite(f, L0, L, wag, x, y, rot, sx, a = 1){
+  liteSprite(f, Math.max(L, L0 * 1.2) * CREATURE_R, x, y, () => {
+    ctx.rotate(rot); ctx.scale(sx, 1);
+    BASE_A = SPECIES[f.sp].finAlpha * a; BODY_A = a; ctx.globalAlpha = BODY_A;
+    PAINT[f.sp](L, wag, f);
+  });
+}
+export function drawSnailTiltLite(f, L0, x, y, sx, p){
+  liteSprite(f, L0 * 1.2 * CREATURE_R, x, y, () => { ctx.scale(sx, 1); ctx.globalAlpha = BODY_A; paintSnailTilt(L0, f, p); });
+}
+export function drawSnailFrontLite(f, L0, L, x, y, rot, a = 1){
+  liteSprite(f, Math.max(L, L0 * 1.2) * CREATURE_R, x, y, () => { ctx.rotate(rot); ctx.globalAlpha = a; paintSnailFront(L, f); });
+}
