@@ -730,6 +730,59 @@ for (const [sp, acts] of Object.entries(ACTS_NEW)) {
   check("軽量モード:オフに戻すと跡がまた出る", core.liteOn === false && TS().stamps > 0 && mainM.trailLevel() > 0);
   frames(60);
 
+  // 軽量モード(L2):作り置きの層。600 フレーム回して例外なし・各キャッシュが作られる・描き直しの回数が想定どおり
+  ag.setAgingOn(false); ag.setAgingState({ algaeHard: 0.6, algaeGlass: 0.3 }); // 苔の量を固定(時間で変わらない)
+  if (!core.liteOn) clickLite();
+  scene.liteRelease(); let errC = null;
+  try { frames(600); } catch (e) { errC = e; }
+  const ls = scene.liteStats(), want = ["hard", "plantsBack", "plantsMid", "plantsFront"];
+  check("軽量モード(L2):600 フレーム回して例外なし・作り置きが 4 層(流木岩/奥・中景・前景の水草)できる", !errC && want.every(k => ls[k]) && ls.hard.calls >= 590, errC ? String(errC.stack || errC) : JSON.stringify(ls));
+  check("軽量モード(L2a):条件が変わらない間、流木・岩・こけの描き直しは初回の 1 回だけ", ls.hard.redraws === 1, `calls ${ls.hard.calls} / redraws ${ls.hard.redraws}`);
+  const hr0 = ls.hard.redraws; ag.setAgingState({ algaeHard: 0.9 }); frames(3);
+  const hr1 = scene.liteStats().hard.redraws; frames(3); const hr2 = scene.liteStats().hard.redraws;
+  check("軽量モード(L2a):苔の量が変わると描き直し(1 回)、変わらなければまた 0 回", hr1 === hr0 + 1 && hr2 === hr1, `${hr0} → ${hr1} → ${hr2}`);
+  check("軽量モード(L2b):水草の描き直しは層ごとにおよそ 1/3 のフレーム", ["plantsBack", "plantsMid", "plantsFront"].every(k => Math.abs(ls[k].redraws - ls[k].calls / 3) <= 1.5), ["plantsBack", "plantsMid", "plantsFront"].map(k => `${k} ${ls[k].redraws}/${ls[k].calls}`).join(" "));
+  // 描き直すフレームが層ごとにずれる(3 層が同じフレームに重ならない)
+  {
+    const before = scene.liteStats(), seen = []; 
+    for (let i = 0; i < 12; i++) { frames(1); const st = scene.liteStats(); seen.push(["plantsBack", "plantsMid", "plantsFront"].filter(k => st[k].redraws !== before[k].redraws).length); Object.assign(before, JSON.parse(JSON.stringify(st))); }
+    check("軽量モード(L2b):1 フレームに描き直す層は最大 1 つ(負担を平らにする)", Math.max(...seen) <= 1 && seen.reduce((x, y) => x + y, 0) === 12, seen.join(""));
+  }
+  // 軽量モードと通常モードを行き来して例外なし。通常に戻ると作り置きは捨てられる
+  let errT = null;
+  try { for (let i = 0; i < 10; i++) { clickLite(); frames(7); } } catch (e) { errT = e; }
+  check("軽量モード(L2):軽量・通常を 10 回行き来して例外なし", !errT && core.liteOn === true, errT ? String(errT.stack || errT) : "");
+  clickLite(); frames(2);
+  check("軽量モード(L2):通常モードに戻ると作り置きが捨てられる", core.liteOn === false && !scene.liteActive());
+  clickLite(); frames(2);
+  check("軽量モード(L2):もう一度オンにすると作り直される", scene.liteActive() && scene.liteStats().hard.redraws === 1);
+  // 1 フレームあたりの描画命令(パスの fill+stroke)を通常と並べる(層ごと。参考値)
+  {
+    const KEYS = ["fill", "stroke", "drawImage"];
+    const n = { fill: 0, stroke: 0, drawImage: 0 }, origCE = document.createElement, cx = core.ctx;
+    const inst = g => { for (const k of KEYS) g[k] = () => { n[k]++; }; return g; };
+    document.createElement = tag => { const e = origCE(tag); if (tag === "canvas") { const gc = e.getContext; e.getContext = (...a) => inst(gc.apply(e, a)); } return e; };
+    const per = (fn, N = 30) => { scene.liteRelease(); fn(); for (const k of KEYS) n[k] = 0; for (let i = 0; i < N; i++) fn(); return { p: (n.fill + n.stroke) / N, d: n.drawImage / N }; };
+    inst(cx);
+    const T0 = 3, sc = scene, P = sc.plants;
+    const fb = () => P.back.forEach(p => p.type === "ribbon" ? sc.drawRibbon(p, T0) : sc.drawStem(p, T0));
+    const fm = () => P.mid.forEach(p => p.type === "fern" ? sc.drawFern(p, T0) : p.type === "lotus" ? sc.drawLotus(p, T0) : sc.drawSword(p, T0));
+    const ff = () => P.front.forEach(p => { if (p.type === "tuft") p.blades.forEach(b => sc.drawRibbon(b, T0)); else sc.drawCarpet(p, T0); });
+    ag.setAgingState({ algaeHard: 1 });
+    const rows = {};
+    rows["流木・岩・こけ・苔"] = [per(() => { sc.drawWood(); sc.rocks.forEach(sc.drawRock); sc.drawMoss(); sc.drawAgingHard(); }), per(() => sc.drawHardLite())];
+    rows["奥の水草"] = [per(fb), per(() => sc.liteLayer("b", { every: 3 }, fb))];
+    rows["中景の草"] = [per(fm), per(() => sc.liteLayer("m", { every: 3, phase: 1 }, fm))];
+    rows["前景の草"] = [per(ff), per(() => sc.liteLayer("f", { every: 3, phase: 2 }, ff))];
+    rows["泡"] = [per(() => sc.drawBubbles()), per(() => sc.drawBubblesLite())];
+    document.createElement = origCE; for (const k of KEYS) delete cx[k]; scene.liteRelease();
+    const ok = Object.values(rows).every(([a, b]) => b.p < a.p);
+    check("軽量モード(L2):1 フレームのパス(fill+stroke)は、どの層でも通常より少ない(参考値)", ok, Object.entries(rows).map(([k, [a, b]]) => `${k} ${a.p.toFixed(1)}→${b.p.toFixed(1)}(drawImage ${a.d.toFixed(1)}→${b.d.toFixed(1)})`).join(" / "));
+  }
+  clickLite(); frames(2); // オフへ戻す(以降のテストは通常モード)
+  ag.setAgingOn(true);
+  frames(60);
+
   // 性能による切り替え:測定値を GOV.override で与える
   const modeSeq = (ms, n) => { gov.GOV.override = ms; const seq = []; for (let i = 0; i < n; i++) { frames(1); seq.push(gov.govState().mode); } return seq; };
   const firstIdx = (seq, m) => seq.indexOf(m);

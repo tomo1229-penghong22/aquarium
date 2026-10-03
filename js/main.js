@@ -7,7 +7,7 @@ import { drawFish } from "./fish-render.js";
 import { drawCrawlers, grazers, relayout, updateCrawler } from "./crawlers.js";
 import { govGrace, govTick, trailStrength } from "./governor.js";
 import { fishes, schools, syncFish, updateFish, updateHealth, updateSchools } from "./fish-behavior.js";
-import { FX, bubbles, buildMeter, buildScene, drawBubbles, drawCarpet, drawAgingGlass, drawAgingHard, drawCaustics, drawClock, drawFern, drawFixture, drawFloats, drawGlass, drawLotus, drawMoss, drawMotes, drawO2Meter, drawPuffs, drawRays, drawRibbon, drawRock, drawStem, drawSurface, drawSword, drawThermometer, drawWood, grade, plants, rocks, staticLayer, staticNight, updateBubbles, updatePuffs, updateTrails } from "./scene.js";
+import { FX, bubbles, buildMeter, buildScene, drawBubbles, drawBubblesLite, drawHardLite, liteLayer, liteRelease, liteActive, drawCarpet, drawAgingGlass, drawAgingHard, drawCaustics, drawClock, drawFern, drawFixture, drawFloats, drawGlass, drawLotus, drawMoss, drawMotes, drawO2Meter, drawPuffs, drawRays, drawRibbon, drawRock, drawStem, drawSurface, drawSword, drawThermometer, drawWood, grade, plants, rocks, staticLayer, staticNight, updateBubbles, updatePuffs, updateTrails } from "./scene.js";
 import { autoLightTick, layoutClockBtn, setNight, showNoticeIfAny, updatePanel } from "./ui.js";
 import { PERF, benchOn, dprCap, perfBegin, perfBenchInit, perfEnd, perfFrame, perfMark, perfReport, skipOn } from "./perf.js";
 
@@ -27,13 +27,16 @@ function draw(){
   if (PERF) perfMark("static");
   if (!skipOn("rays")) drawRays(T);
   if (PERF) perfMark("rays");
-  if (!skipOn("backPlants")) plants.back.forEach(p => p.type === "ribbon" ? drawRibbon(p, T) : drawStem(p, T));
+  if (!liteOn && liteActive()) liteRelease(); // 通常モードに戻ったら作り置きを捨てる
+  // 軽量モード(L2):水草は層ごとの作り置きを 3 フレームに 1 回だけ描き直して貼る(層ごとに描き直すフレームをずらす)
+  const LITE_EVERY = 3;
+  if (!skipOn("backPlants")) { const f = () => plants.back.forEach(p => p.type === "ribbon" ? drawRibbon(p, T) : drawStem(p, T)); liteOn ? liteLayer("plantsBack", { every: LITE_EVERY, phase: 0 }, f) : f(); }
   if (PERF) perfMark("backPlants");
   // 奥の水草は不透明(後ろの草が透けない)。奥行きの淡さは、この霞(水の色の薄い重ね。以前の水草の半透明 0.78 の分を引き受ける)で表す
   const hazeOn = !skipOn("haze"); // haze:3 か所の全面の霞(奥の水草の後・流木の前・手前の魚の前)をまとめて飛ばす
   if (hazeOn) { ctx.fillStyle = nightT > 0.5 ? "rgba(70,120,140,0.2)" : "rgba(130,200,190,0.19)"; ctx.fillRect(0, waterTop, W, H * 0.82 - waterTop); }
   if (PERF) perfMark("haze");
-  if (!skipOn("bubbles")) drawBubbles();
+  if (!skipOn("bubbles")) liteOn ? drawBubblesLite() : drawBubbles();
   if (PERF) perfMark("bubbles");
   const sorted = fishes.filter(f => !SPECIES[f.sp].solo).sort((a, b) => a.z - b.z);
   if (!skipOn("backFish")) {
@@ -43,12 +46,16 @@ function draw(){
   if (PERF) perfMark("backFish");
   if (hazeOn) { ctx.fillStyle = "rgba(110,180,175,0.045)"; ctx.fillRect(0, waterTop, W, H * 0.82 - waterTop); }
   if (!skipOn("midground")) {
-    drawWood();                 // 流木・岩は不透明(層の透明度なし)
-    rocks.forEach(drawRock);
-    drawMoss();
-    drawAgingHard();
+    if (liteOn) drawHardLite(); // 軽量モード:流木・岩・こけ・苔は作り置きの 1 枚(変化したときだけ描き直す)
+    else {
+      drawWood();                 // 流木・岩は不透明(層の透明度なし)
+      rocks.forEach(drawRock);
+      drawMoss();
+      drawAgingHard();
+    }
     drawCrawlers("low"); // 岩・砂・流木の上の貝・エビ・オト
-    plants.mid.forEach(p => p.type === "fern" ? drawFern(p, T) : p.type === "lotus" ? drawLotus(p, T) : drawSword(p, T));
+    const fm = () => plants.mid.forEach(p => p.type === "fern" ? drawFern(p, T) : p.type === "lotus" ? drawLotus(p, T) : drawSword(p, T));
+    liteOn ? liteLayer("plantsMid", { every: LITE_EVERY, phase: 1 }, fm) : fm();
   }
   if (PERF) perfMark("midground");
   if (hazeOn) { ctx.fillStyle = nightT > 0.5 ? "rgba(70,120,140,0.07)" : "rgba(130,200,190,0.07)"; ctx.fillRect(0, waterTop, W, H * 0.82 - waterTop); } // 中景の草・岩・流木の淡さ(手前の魚の後ろ)
@@ -58,7 +65,7 @@ function draw(){
     drawPuffs();           // コリドラスの砂煙
   }
   if (PERF) perfMark("frontFish");
-  if (!skipOn("frontPlants")) plants.front.forEach(p => { if (p.type === "tuft") p.blades.forEach(b => drawRibbon(b, T)); else drawCarpet(p, T); });
+  if (!skipOn("frontPlants")) { const f = () => plants.front.forEach(p => { if (p.type === "tuft") p.blades.forEach(b => drawRibbon(b, T)); else drawCarpet(p, T); }); liteOn ? liteLayer("plantsFront", { every: LITE_EVERY, phase: 2 }, f) : f(); }
   if (PERF) perfMark("frontPlants");
   if (!skipOn("floats")) drawFloats(T);
   if (PERF) perfMark("floats");

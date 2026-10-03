@@ -1,5 +1,5 @@
 // 水槽の情景(配置・水草・光・水面・温度計・ガラス・エアストーン・泡)の生成と描画。
-import { DPR, H, TAU, counts, Tw, U, W, clamp, ctx, current, lerp, mix, mulberry, nightT, noise1, sandY, waterTop } from "./core.js";
+import { DPR, H, TAU, counts, Tw, U, W, clamp, ctx, current, lerp, mix, mulberry, nightT, noise1, sandY, setCtx, waterTop } from "./core.js";
 import { DO, RATE, agingOn, algaeGlass, algaeHard, clog, dirt, glassMult, growth, hardMult, sinceClean } from "./aging.js";
 
 /* 水草・岩・流木は不透明に描く(層ごとの globalAlpha はやめた。後ろの物が透けて見えない)。
@@ -139,6 +139,7 @@ export function buildScene(){
   for (let i = 0; i < 60; i++) motes.push({ x: r() * W, y: waterTop + r() * (H * 0.78 - waterTop), s: 0.6 + r() * 1.3, a: 0.12 + r() * 0.25, k: r() * 100 });
   buildStatic();
   buildLight();
+  liteRelease(); // 軽量モードの作り置きは resize で捨てる(必要になったとき作り直す)
   buildAging();
   buildMeter();
 }
@@ -1125,6 +1126,68 @@ export function drawBubbles(){
     ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, TAU); ctx.fill(); ctx.stroke();
     ctx.fillStyle = "rgba(255,255,255,0.8)"; ctx.beginPath(); ctx.arc(b.x - b.r * 0.35, b.y - b.r * 0.35, b.r * 0.28, 0, TAU); ctx.fill();
   });
+}
+/* ---------------- 軽量モードの作り置き(liteOn のときだけ main.js が使う) ----------------
+   描画するパスの数を減らすため、(1) 動かない物(流木・岩・こけ・岩流木の苔)、(2) 水草(奥・中景・前景)、(3) 泡を、
+   作り置きの画像として貼る。全面のオフスクリーンは W*DPR × H*DPR(貼るときは 1:1 なのでぼやけない)。
+   画像は不透明な物体を不透明のまま焼いたもの(drawImage は globalAlpha=1)。resize(buildScene)と通常モードへの切り替えで捨てる。
+   トップレベルでは何も作らない(必要になった最初の呼び出しで作る)。 */
+const LITE = { layers: {}, bub: null };
+export function liteRelease(){ LITE.layers = {}; LITE.bub = null; }
+export const liteActive = () => Object.keys(LITE.layers).length > 0 || !!LITE.bub;
+/* 層ごとの作り置きの状態(テスト・計測用):{ 名前: { calls: 貼った回数, redraws: 描き直した回数 } } */
+export const liteStats = () => Object.fromEntries(Object.entries(LITE.layers).map(([k, L]) => [k, { calls: L.calls, redraws: L.redraws }]));
+/* name の全面オフスクリーンを貼る。描き直すのは、初回・(every 指定なら every 回に 1 回。phase は最初の位置のずらし)・(every なしなら key が変わったとき)。
+   描き直しのときだけ fn() をオフスクリーンへ向けて呼ぶ(ctx を差し替える。fn は素の ctx と U だけを使う) */
+export function liteLayer(name, { key = 0, every = 0, phase = 0 } = {}, fn){
+  let L = LITE.layers[name];
+  if (!L) {
+    const c = document.createElement("canvas"); c.width = Math.round(W * DPR); c.height = Math.round(H * DPR);
+    L = LITE.layers[name] = { c, g: c.getContext("2d"), n: phase, key: undefined, fresh: true, calls: 0, redraws: 0 };
+  }
+  L.calls++;
+  const due = L.fresh || (every ? L.n % every === 0 : key !== L.key);
+  L.n++;
+  if (due) {
+    const orig = ctx, g = L.g;
+    L.fresh = false; L.key = key; L.redraws++;
+    setCtx(g);
+    try {
+      g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, L.c.width, L.c.height);
+      g.setTransform(DPR, 0, 0, DPR, 0, 0); g.globalAlpha = 1;
+      fn();
+    } finally { setCtx(orig); }
+  }
+  ctx.drawImage(L.c, 0, 0, W, H);
+}
+/* 動かない物(流木・岩・こけ・岩流木の苔)。苔の量は 1/512 刻みで量子化し、変わったときだけ描き直す(時間で動く要素はない) */
+export function drawHardLite(){
+  liteLayer("hard", { key: Math.round(algaeHard * 512) }, () => { drawWood(); rocks.forEach(drawRock); drawMoss(); drawAgingHard(); });
+}
+/* 泡の作り置き(大きさ数段階の小さな画像)。形は drawBubbles と同じ(薄い塗り・縁・ハイライト) */
+const BUB_K = [1.2, 1.8, 2.7, 4, 6];
+function bubbleSprites(){
+  if (LITE.bub) return LITE.bub;
+  return LITE.bub = BUB_K.map(k => {
+    const r = k * U, S = 2 * (r + 1 * U), [c, g] = mkCanvas(Math.max(1, Math.ceil(S * DPR)), Math.max(1, Math.ceil(S * DPR)));
+    g.scale(c.width / S, c.height / S); // 画素にぴったり合わせる(S は小数のため)
+    g.strokeStyle = "rgba(255,255,255,0.55)"; g.lineWidth = 0.8 * U; g.fillStyle = "rgba(230,250,250,0.18)";
+    g.beginPath(); g.arc(S / 2, S / 2, r, 0, TAU); g.fill(); g.stroke();
+    g.fillStyle = "rgba(255,255,255,0.8)"; g.beginPath(); g.arc(S / 2 - r * 0.35, S / 2 - r * 0.35, r * 0.28, 0, TAU); g.fill();
+    return { c, r, S };
+  });
+}
+export function drawBubblesLite(){
+  const a = airstone(), sp = bubbleSprites();
+  ctx.strokeStyle = "rgba(210,230,230,0.28)"; ctx.lineWidth = 2 * U;
+  ctx.beginPath(); ctx.moveTo(a.x + 6 * U, a.y); ctx.lineTo(a.x + 12 * U, waterTop - 8 * U); ctx.stroke();
+  ctx.fillStyle = "#8d8a80"; ctx.beginPath(); ctx.ellipse(a.x, a.y, 11 * U, 5 * U, 0, 0, TAU); ctx.fill();
+  for (const b of bubbles) {
+    let s = sp[0], best = Infinity;
+    for (const q of sp) { const d = Math.abs(Math.log(b.r / q.r)); if (d < best) { best = d; s = q; } }
+    const sz = s.S * b.r / s.r;
+    ctx.drawImage(s.c, b.x - sz / 2, b.y - sz / 2, sz, sz);
+  }
 }
 export function drawMotes(t){
   ctx.save(); ctx.globalCompositeOperation = "screen";
